@@ -32,6 +32,8 @@
       padding: 8px 14px; border-radius: 8px; background: rgba(0,0,0,0.75); color: #fff; font: 600 14px system-ui, sans-serif;
       opacity: 0; transition: opacity .2s; pointer-events: none; }
     #toast.show { opacity: 1; }
+    #controls { position: fixed; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+      background: rgba(0,0,0,0.55); color: #fff; font: 13px system-ui, sans-serif; border-radius: 6px; }
     #toast.good { background: rgba(21,128,61,0.9); }
     #toast.bad { background: rgba(185,28,28,0.9); }
   </style>
@@ -46,6 +48,14 @@
     <button id="play" title="Play (Space)">▶ Play</button>
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
+  <div id="controls">
+    <label>Home <select id="formation-home"></select></label>
+    <label>Away <select id="formation-away"></select></label>
+    <label>Ball <select id="possession"><option value="home">Home</option><option value="away">Away</option></select></label>
+    <label><input type="checkbox" id="show-away"> Show opposition</label>
+    <button id="to-base">Back to base (B)</button>
+    <button id="make-base">Make this the base</button>
+  </div>
 <script>
 'use strict';
 
@@ -101,6 +111,9 @@ const state = {
   tool: 'move',                     // 'move' | 'runs' | 'pass'
   pendingPass: null,                // { passerId, receiverId, x, y } queued behind runs
   match: null,                      // match-play state when a game is running
+  formations: { home: '4-3-3', away: '4-4-2' },
+  showAway: true,
+  baseBall: { x: 0, y: 0 },
 };
 
 // A player: current position, base position, and an optional run
@@ -117,6 +130,7 @@ function makePlayer(team, slot, i) {
 }
 
 function setupMatch(homeFormation, awayFormation) {
+  state.formations = { home: homeFormation, away: awayFormation };
   state.players = [
     ...FORMATIONS[homeFormation].map((s, i) => makePlayer('home', s, i)),
     ...FORMATIONS[awayFormation].map((s, i) => makePlayer('away', s, i)),
@@ -124,7 +138,106 @@ function setupMatch(homeFormation, awayFormation) {
   // Start the ball at the home #6's feet.
   const six = state.players.find((p) => p.team === 'home' && p.num === 6);
   state.ball = { x: six.x + 1.6, y: six.y };
+  state.baseBall = { ...state.ball };
   state.selected = null;
+  state.pendingPass = null;
+}
+
+// Swap one side's formation; the side keeps the ball if it had it.
+function setFormation(team, name) {
+  const had = state.possession === team && carrier();
+  state.formations[team] = name;
+  const fresh = FORMATIONS[name].map((s, i) => makePlayer(team, s, i));
+  state.players = team === 'home' ? [...fresh, ...state.players.filter((p) => p.team !== team)]
+    : [...state.players.filter((p) => p.team !== team), ...fresh];
+  state.pendingPass = null;
+  state.selected = null;
+  if (had) giveBall(nearestTo(state.ball, team));
+}
+
+function nearestTo(pt, team) {
+  let best = null, bestD = Infinity;
+  for (const p of state.players) {
+    if (p.team !== team || !visible(p)) continue;
+    const d = dist(p, pt);
+    if (d < bestD) { best = p; bestD = d; }
+  }
+  return best;
+}
+
+function giveTeamBall(team) {
+  if (team === 'away') state.showAway = true;
+  giveBall(nearestTo(state.ball, team));
+  state.pendingPass = null;
+}
+
+const copyRun = (r) => (r ? { ...r } : null);
+function backToBase() {
+  if (anim || state.match) return;
+  for (const p of state.players) { p.x = p.base.x; p.y = p.base.y; p.run = copyRun(p.baseRun); }
+  state.ball = { ...state.baseBall };
+  state.pendingPass = null;
+  toast('Back to base');
+}
+function makeBase() {
+  if (anim || state.match) return;
+  for (const p of state.players) { p.base = { x: p.x, y: p.y }; p.baseRun = copyRun(p.run); }
+  state.baseBall = { ...state.ball };
+  toast('Saved as the base position');
+}
+
+/* ================================================================
+   Persistence
+   Storage can be missing, full or blocked (private windows), so every
+   access is wrapped and the board always has an in-memory fallback.
+   ================================================================ */
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
+  },
+};
+const BOARD_KEY = 'tacticsLab.board.v1';
+const isPt = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
+const cleanPt = (p) => { const q = { x: p.x, y: p.y }; clampToPitch(q); return q; };
+const cleanRun = (r) => (r && isPt(r) ? { ...cleanPt(r), bend: clamp(Number(r.bend) || 0, -MAX_BEND, MAX_BEND) } : null);
+
+function snapshot() {
+  return {
+    formations: state.formations, showAway: state.showAway, coverage: state.coverage, layers: state.layers,
+    possession: state.possession, ball: state.ball, baseBall: state.baseBall,
+    players: state.players.map((p) => ({ x: p.x, y: p.y, base: p.base, run: p.run, baseRun: p.baseRun })),
+  };
+}
+
+// Apply a snapshot, ignoring anything malformed. Returns false if unusable.
+function restore(s) {
+  if (!s || !s.formations || !FORMATIONS[s.formations.home] || !FORMATIONS[s.formations.away]) return false;
+  setupMatch(s.formations.home, s.formations.away);
+  if (Array.isArray(s.players) && s.players.length === state.players.length) {
+    s.players.forEach((q, i) => {
+      const p = state.players[i];
+      if (isPt(q)) Object.assign(p, cleanPt(q));
+      if (isPt(q.base)) p.base = cleanPt(q.base);
+      p.run = cleanRun(q.run);
+      p.baseRun = cleanRun(q.baseRun);
+    });
+  }
+  if (isPt(s.ball)) state.ball = cleanPt(s.ball);
+  if (isPt(s.baseBall)) state.baseBall = cleanPt(s.baseBall);
+  if (['control', 'zones', 'off'].includes(s.coverage)) state.coverage = s.coverage;
+  if (s.layers && typeof s.layers === 'object') for (const k in state.layers) if (typeof s.layers[k] === 'boolean') state.layers[k] = s.layers[k];
+  state.showAway = s.showAway !== false;
+  if (s.possession === 'home' || s.possession === 'away') state.possession = s.possession;
+  return true;
+}
+
+let saveTimer = 0;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { if (!anim && !state.match) store.set(BOARD_KEY, snapshot()); }, 300);
 }
 
 function carrier() {
@@ -1157,6 +1270,27 @@ function drawPasses() {
 }
 
 /* ================================================================
+   Board controls
+   ================================================================ */
+const $ = (sel) => document.querySelector(sel);
+for (const team of ['home', 'away']) {
+  const sel = $(`#formation-${team}`);
+  sel.innerHTML = Object.keys(FORMATIONS).map((f) => `<option>${f}</option>`).join('');
+  sel.addEventListener('change', () => { if (!anim && !state.match) setFormation(team, sel.value); requestRender(); });
+}
+$('#possession').addEventListener('change', (ev) => { if (!anim && !state.match) giveTeamBall(ev.target.value); requestRender(); });
+$('#show-away').addEventListener('change', (ev) => { state.showAway = ev.target.checked; state.pendingPass = null; requestRender(); });
+$('#to-base').addEventListener('click', () => { backToBase(); requestRender(); });
+$('#make-base').addEventListener('click', () => { makeBase(); requestRender(); });
+
+function syncControls() {
+  $('#formation-home').value = state.formations.home;
+  $('#formation-away').value = state.formations.away;
+  $('#possession').value = state.possession;
+  $('#show-away').checked = state.showAway;
+}
+
+/* ================================================================
    Toolbar, toasts, shortcuts
    ================================================================ */
 function setTool(tool) {
@@ -1182,6 +1316,7 @@ window.addEventListener('keydown', (ev) => {
   if (k === 'v') setTool('move');
   else if (k === 'r') setTool('runs');
   else if (k === 'p') setTool('pass');
+  else if (k === 'b') backToBase();
   else if (k === ' ') { ev.preventDefault(); play(); }
   else if (k === 'c') state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
   else if (k === 'escape') state.selected = null;
@@ -1278,11 +1413,14 @@ function requestRender() {
     if (DEBUG) drawDebug();
     drawPlayers();
     updateReadout();
+    syncControls();
+    if (!anim && !drag) scheduleSave();
   });
 }
 
 readTokens();
-setupMatch('4-3-3', '4-4-2');
+if (!restore(store.get(BOARD_KEY, null))) setupMatch('4-3-3', '4-4-2');
+syncControls();
 
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);

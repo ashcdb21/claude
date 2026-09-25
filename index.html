@@ -13,6 +13,9 @@
       --home: #2563eb;
       --away: #dc2626;
       --select: #fbbf24;
+      --offside: #fde047;
+      --blocked: #f87171;
+      --badge: #fde68a;
     }
     html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; }
     #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
@@ -73,6 +76,8 @@ const state = {
   ball: { x: 0, y: 0 },
   selected: null,                   // player id
   coverage: 'control',              // 'control' | 'zones' | 'off'
+  possession: 'home',               // last team to have a carrier
+  layers: { lanes: true, lines: true, offside: true, shape: true, roles: false },
 };
 
 // A player: current position, base position, and an optional run
@@ -102,6 +107,7 @@ function setupMatch(homeFormation, awayFormation) {
 function carrier() {
   let best = null, bestD = CARRY_R;
   for (const p of state.players) {
+    if (!visible(p)) continue;
     const d = Math.hypot(p.x - state.ball.x, p.y - state.ball.y);
     if (d <= bestD) { best = p; bestD = d; }
   }
@@ -231,20 +237,150 @@ function controlContour() {
 }
 
 /* ================================================================
+   Analysis 3 — Passing lanes
+   A lane from passer P to teammate R (within 42 m) is blocked if any
+   opponent O, projecting onto PR at distance t along it (0 < t < |PR|),
+   sits closer to the segment than
+     1.3 + 0.05 × min(t, |PR| - t)
+   i.e. a defender needs to be tight to cut a lane near either end, but
+   has more room to get across it in the middle of a long ball.
+   ================================================================ */
+const LANE_RANGE = 42;
+const opponentsOf = (team) => state.players.filter((p) => p.team !== team && visible(p));
+const teammatesOf = (p) => state.players.filter((q) => q.team === p.team && q !== p);
+const attackDir = (team) => (team === 'home' ? 1 : -1);     // +x for home, -x for away
+const visible = (p) => p.team === 'home' || state.showAway !== false;
+
+function laneBlocker(from, to, opponents) {
+  const len = dist(from, to);
+  if (len < 1e-6) return null;
+  const ux = (to.x - from.x) / len, uy = (to.y - from.y) / len;
+  let worst = null, worstMargin = 0;
+  for (const o of opponents) {
+    const t = (o.x - from.x) * ux + (o.y - from.y) * uy;
+    if (t <= 0 || t >= len) continue;
+    const perp = Math.abs((o.x - from.x) * uy - (o.y - from.y) * ux);
+    const margin = 1.3 + 0.05 * Math.min(t, len - t) - perp;
+    if (margin > worstMargin) { worst = o; worstMargin = margin; }
+  }
+  return worst;
+}
+
+function lanesFrom(passer) {
+  const opp = opponentsOf(passer.team);
+  return teammatesOf(passer)
+    .filter((r) => dist(passer, r) <= LANE_RANGE)
+    .map((r) => {
+      const blocker = laneBlocker(passer, r, opp);
+      return { from: passer, to: r, len: dist(passer, r), blocker, breaks: linesBroken(passer, r) };
+    });
+}
+
+/* ================================================================
+   Analysis 4 — Lines broken
+   Each team's outfielders are grouped by unit (D, DM, M, AM, A) and a
+   unit's line is its mean x. A pass breaks an opposing line when that
+   mean x lies strictly between passer and receiver, with the receiver
+   further forward in the passer's attacking direction.
+   ================================================================ */
+function unitLines(team) {
+  const groups = {};
+  for (const p of state.players) {
+    if (p.team !== team || p.unit === 'G' || !visible(p)) continue;
+    (groups[p.unit] ||= []).push(p.x);
+  }
+  return Object.entries(groups).map(([unit, xs]) => ({ unit, x: xs.reduce((a, b) => a + b, 0) / xs.length }));
+}
+
+function linesBroken(from, to, team = from.team) {
+  const dir = attackDir(team);
+  const a = from.x * dir, b = to.x * dir;
+  if (b <= a) return 0;
+  const other = team === 'home' ? 'away' : 'home';
+  return unitLines(other).filter((l) => l.x * dir > a && l.x * dir < b).length;
+}
+
+/* ================================================================
+   Analysis 5 — Offside line
+   For the team in possession: the second-last defender's depth, or the
+   ball's if it is further forward, and never behind halfway. "Depth" is
+   x × attackDir so the same rule works for both directions. Attackers
+   beyond it (other than the carrier) are offside.
+   ================================================================ */
+function offsideLine(team) {
+  const dir = attackDir(team);
+  const depths = opponentsOf(team).map((p) => p.x * dir).sort((a, b) => b - a);
+  const second = depths.length >= 2 ? depths[1] : -Infinity;
+  const depth = Math.max(second, state.ball.x * dir, (PITCH.L / 2) * dir);
+  return depth * dir;
+}
+
+function offsidePlayers(team, lineX, holder) {
+  const dir = attackDir(team);
+  return state.players.filter((p) => p.team === team && p !== holder && p.x * dir > lineX * dir + 1e-9);
+}
+
+/* ================================================================
+   Analysis 6 — Team shape
+   Convex hull of the outfielders (Andrew's monotone chain), with width
+   across the pitch (y span), depth along it (x span) and hull area.
+   ================================================================ */
+function convexHull(pts) {
+  const P = pts.map((p) => ({ x: p.x, y: p.y })).sort((a, b) => a.x - b.x || a.y - b.y);
+  if (P.length < 3) return P;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const p of P) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  for (let i = P.length - 1; i >= 0; i--) {
+    const p = P[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+function teamShape(team) {
+  const out = state.players.filter((p) => p.team === team && p.unit !== 'G' && visible(p));
+  if (!out.length) return null;
+  const xs = out.map((p) => p.x), ys = out.map((p) => p.y);
+  const hull = convexHull(out);
+  return {
+    hull,
+    width: Math.max(...ys) - Math.min(...ys),
+    depth: Math.max(...xs) - Math.min(...xs),
+    area: hull.length >= 3 ? polyArea(hull) : 0,
+  };
+}
+
+/* ================================================================
    Analysis pass: everything the renderer and readout need, recomputed
    from scratch on every frame that changes the board.
    ================================================================ */
 let A = null;   // latest analysis
 
 function analyse() {
-  const players = state.players;
+  const players = state.players.filter(visible);
   const home = players.filter((p) => p.team === 'home');
   const away = players.filter((p) => p.team === 'away');
   const homeShare = computeControl(home, away);
+  const holder = carrier();
+  if (holder) state.possession = holder.team;
+  const team = state.possession;
+  const offX = offsideLine(team);
+  const sel = players.find((p) => p.id === state.selected) || null;
   A = {
     zones: computeZones(players),
     homeShare,
-    carrier: carrier(),
+    carrier: holder,
+    selected: sel,
+    lanes: holder ? lanesFrom(holder) : [],
+    selLanes: sel && sel !== holder ? lanesFrom(sel) : [],
+    offsideX: offX,
+    offside: offsidePlayers(team, offX, holder),
+    shape: { home: teamShape('home'), away: teamShape('away') },
   };
   return A;
 }
@@ -331,7 +467,7 @@ function lineWidthM(metres) {
 const colors = {};
 function readTokens() {
   const css = getComputedStyle(document.documentElement);
-  for (const k of ['surround', 'grass', 'line', 'goal', 'home', 'away', 'select']) colors[k] = css.getPropertyValue('--' + k).trim();
+  for (const k of ['surround', 'grass', 'line', 'goal', 'home', 'away', 'select', 'offside', 'blocked', 'badge']) colors[k] = css.getPropertyValue('--' + k).trim();
   colors.homeRGB = hexToRGB(colors.home);
   colors.awayRGB = hexToRGB(colors.away);
 }
@@ -464,6 +600,75 @@ function drawZones() {
 }
 
 /* ================================================================
+   Tactical overlays: shape, offside line, passing lanes
+   ================================================================ */
+function drawShape() {
+  usePitchSpace();
+  for (const team of ['home', 'away']) {
+    const s = A.shape[team];
+    if (!s || s.hull.length < 3) continue;
+    ctx.beginPath();
+    s.hull.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+    ctx.closePath();
+    ctx.globalAlpha = 0.08; ctx.fillStyle = colors[team]; ctx.fill();
+    ctx.globalAlpha = 0.7; ctx.strokeStyle = colors[team];
+    ctx.lineWidth = lineWidthM(0.25); ctx.setLineDash([1.2, 0.8]); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+}
+
+function drawOffside() {
+  usePitchSpace();
+  ctx.strokeStyle = colors.offside;
+  ctx.lineWidth = lineWidthM(0.22);
+  ctx.setLineDash([1.6, 1]);
+  line(A.offsideX, 0, A.offsideX, PITCH.W);
+  ctx.setLineDash([]);
+}
+
+// Open lanes are white and thin out with distance; blocked ones are dashed red.
+function drawLanes(lanes, faint) {
+  usePitchSpace();
+  ctx.lineCap = 'round';
+  for (const l of lanes) {
+    const { from, to } = l;
+    if (l.blocker) {
+      ctx.strokeStyle = colors.blocked;
+      ctx.globalAlpha = faint ? 0.5 : 0.85;
+      ctx.lineWidth = lineWidthM(0.2);
+      ctx.setLineDash([0.9, 0.7]);
+    } else {
+      ctx.strokeStyle = '#fff';
+      ctx.globalAlpha = faint ? 0.45 : 0.85;
+      ctx.lineWidth = Math.max(0.6 - 0.45 * (l.len / LANE_RANGE), 1.2 / view.s);
+      ctx.setLineDash([]);
+    }
+    line(from.x, from.y, to.x, to.y);
+  }
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  if (!state.layers.lines) return;
+  for (const l of lanes) {
+    if (l.blocker || !l.breaks) continue;
+    badge((l.from.x + l.to.x) / 2, (l.from.y + l.to.y) / 2, `+${l.breaks}`);
+  }
+}
+
+// A small upright pill label centred on a pitch point.
+function badge(x, y, text) {
+  const h = Math.max(1.8, 13 / view.s);
+  uprightAt(x, y, () => {
+    ctx.font = `700 ${h * 0.72}px system-ui, sans-serif`;
+    const w = ctx.measureText(text).width + h * 0.6;
+    ctx.fillStyle = colors.badge;
+    ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, 0, h * 0.04);
+  });
+}
+
+/* ================================================================
    Players and ball
    Sizes are in metres but floored in pixels so they stay legible and
    touchable on a phone, where 1 m can be ~5 px.
@@ -476,7 +681,17 @@ function drawPlayers() {
   const holder = carrier();
   usePitchSpace();
 
+  const offside = new Set(state.layers.offside ? A.offside : []);
   for (const p of state.players) {
+    if (!visible(p)) continue;
+    if (offside.has(p)) {
+      ctx.save();
+      ctx.strokeStyle = colors.offside;
+      ctx.lineWidth = r * 0.16;
+      ctx.setLineDash([r * 0.3, r * 0.2]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.8, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
     ctx.fillStyle = colors[p.team];
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = r * 0.14;
@@ -637,10 +852,21 @@ function drawDebug() {
    ================================================================ */
 const readoutEl = document.getElementById('readout');
 function updateReadout() {
-  const sel = state.players.find((p) => p.id === state.selected);
+  const fmtShape = (s) => (s ? `${s.width.toFixed(0)}w × ${s.depth.toFixed(0)}d m, ${s.area.toFixed(0)} m²` : '—');
+  const laneSummary = (lanes) => {
+    const open = lanes.filter((l) => !l.blocker);
+    const best = open.reduce((b, l) => (l.breaks > (b?.breaks ?? 0) ? l : b), null);
+    return `${open.length}/${lanes.length} lanes open` + (best ? `, best +${best.breaks} to #${best.to.num}` : '');
+  };
+  const c = A.carrier, sel = A.selected;
   const lines = [
     `Space controlled — Home ${(A.homeShare * 100).toFixed(1)}%  ·  Away ${((1 - A.homeShare) * 100).toFixed(1)}%`,
-    sel ? `Selected ${sel.team} #${sel.num} ${sel.role} — zone ${A.zones.get(sel.id).area.toFixed(0)} m²` : 'Tap a player to see their zone',
+    `Possession ${state.possession}` + (c ? ` — #${c.num} ${c.role}: ${laneSummary(A.lanes)}` : ' — ball loose'),
+    `Offside line x = ${A.offsideX.toFixed(1)} m` + (A.offside.length ? ` (offside: ${A.offside.map((p) => '#' + p.num).join(', ')})` : ''),
+    `Shape home ${fmtShape(A.shape.home)}`,
+    `Shape away ${fmtShape(A.shape.away)}`,
+    sel ? `Selected ${sel.team} #${sel.num} ${sel.role} — zone ${A.zones.get(sel.id).area.toFixed(0)} m²` +
+      (sel !== c ? `, ${laneSummary(A.selLanes)}` : '') : 'Tap a player to select',
   ];
   readoutEl.textContent = lines.join('\n');
 }
@@ -658,6 +884,9 @@ function requestRender() {
     drawPitch();
     if (state.coverage === 'control') drawControl();
     else if (state.coverage === 'zones') drawZones();
+    if (state.layers.shape) drawShape();
+    if (state.layers.offside) drawOffside();
+    if (state.layers.lanes) { drawLanes(A.selLanes, true); drawLanes(A.lanes, false); }
     if (DEBUG) drawDebug();
     drawPlayers();
     updateReadout();

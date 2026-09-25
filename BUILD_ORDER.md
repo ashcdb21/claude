@@ -10,7 +10,7 @@ Each phase builds against a section of `SPEC.md`.
 | 1 | Pitch renderer (metre→pixel transform, markings, portrait rotation, ResizeObserver) | `index.html` | Done |
 | 2 | 22 players + ball, Move tool, 4-3-3 vs 4-4-2, carrier within 2.6 m | `index.html` | Done |
 | 3 | Voronoi zones (exact clipping) + pitch control (grid + logistic), minimal readout | `index.html` | Done |
-| 4 | Passing lanes, "+n" lines broken, offside line, team shape | `index.html` | |
+| 4 | Passing lanes, "+n" lines broken, offside line, team shape | `index.html` | Done |
 | 5 | Runs tool, bend handle (both directions), Play animation | `index.html` | |
 | 6 | Pass tool + resolution (interception, 35 m lofted rule, into space, toasts, queue behind runs at ~30%) | `index.html` | |
 | 7 | Formations (7 per side), possession/visibility, base state, localStorage persistence | `index.html` | |

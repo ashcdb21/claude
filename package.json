@@ -1,0 +1,12 @@
+{
+  "name": "tactics-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-based interactive football tactics board",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

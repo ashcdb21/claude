@@ -15,7 +15,7 @@ Each phase builds against a section of `SPEC.md`.
 | 6 | Pass tool + resolution (interception, 35 m lofted rule, into space, toasts, queue behind runs at ~30%) | `index.html` | Done |
 | 7 | Formations (7 per side), possession/visibility, base state, localStorage persistence | `index.html` | Done |
 | 8 | Side panel / mobile sheet, layer toggles, saved tactics, shortcuts | `index.html` | Done |
-| 9 | Visual polish, dark-mode tokens, offscreen background cache | `index.html` | |
+| 9 | Visual polish, dark-mode tokens, offscreen background cache | `index.html` | Done |
 | 10 | `askClaude()` adapter + `/api/claude` proxy, temporary ping (removed after) | `server.js`, `index.html` | |
 | 11 | Scenario builder with hand-authored fallback, validated/clamped JSON | `index.html` | |
 | 12 | Match play with heuristic opponent only | `index.html` | |

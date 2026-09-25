@@ -146,7 +146,17 @@
   <aside id="panel" aria-label="Tactics panel">
     <header><h1>Tactics <span>Lab</span></h1><div><button id="theme" title="Theme">Auto</button><button id="panel-close" aria-label="Close panel">Close</button></div></header>
     <section id="sec-match"><h2>Match play</h2><div id="match-ui"></div></section>
-    <section id="sec-scenarios"><h2>Scenarios</h2><div id="scenario-ui"></div></section>
+    <section id="sec-scenarios">
+      <h2>Scenarios</h2>
+      <textarea id="scenario-text" rows="3" style="width:100%" placeholder="Describe a situation, e.g. ‘their full-back keeps getting free on the overlap’"></textarea>
+      <div class="row">
+        <button class="btn primary" id="scenario-build">Build</button>
+        <button class="btn" id="scenario-cancel" hidden>Cancel</button>
+        <button class="btn" id="scenario-example">Load example</button>
+      </div>
+      <p class="muted" id="scenario-status" role="status"></p>
+      <div id="scenario-ui"></div>
+    </section>
     <section><h2>Readout</h2><div id="readout"></div></section>
     <section><h2>Selected player</h2><div id="selected"></div></section>
     <section>
@@ -283,6 +293,7 @@ function setupMatch(homeFormation, awayFormation) {
   state.baseBall = { ...state.ball };
   state.selected = null;
   state.pendingPass = null;
+  state.basePass = null;
 }
 
 // Swap one side's formation; the side keeps the ball if it had it.
@@ -318,13 +329,14 @@ function backToBase() {
   if (anim || state.match) return;
   for (const p of state.players) { p.x = p.base.x; p.y = p.base.y; p.run = copyRun(p.baseRun); }
   state.ball = { ...state.baseBall };
-  state.pendingPass = null;
+  state.pendingPass = state.basePass ? { ...state.basePass } : null;
   toast('Back to base');
 }
 function makeBase() {
   if (anim || state.match) return;
   for (const p of state.players) { p.base = { x: p.x, y: p.y }; p.baseRun = copyRun(p.run); }
   state.baseBall = { ...state.ball };
+  state.basePass = state.pendingPass ? { ...state.pendingPass } : null;
   toast('Saved as the base position');
 }
 
@@ -1539,6 +1551,9 @@ function drawPasses() {
    Board controls
    ================================================================ */
 const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const who = (p) => `${p.team === 'home' ? 'Home' : 'Away'} #${p.num} ${p.role}`;
+function setHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
 for (const team of ['home', 'away']) {
   const sel = $(`#formation-${team}`);
   sel.innerHTML = Object.keys(FORMATIONS).map((f) => `<option>${f}</option>`).join('');
@@ -1641,6 +1656,236 @@ function parseModelJSON(text) {
 }
 
 /* ================================================================
+   Scenario builder
+   The model describes 2–4 one-phase scenarios as JSON. Nothing from it
+   is trusted: every scenario is rebuilt from a known formation, with
+   positions clamped to the pitch, runs capped at 20 m, bends clamped,
+   text trimmed, and the pass kept only if its receiver exists. The
+   built-in example set goes through the same validator.
+   ================================================================ */
+const RUN_CAP = 20;
+const P = (num, x, y, rx, ry, bend = 0) => ({ num, x, y, run: rx == null ? null : { x: rx, y: ry, bend } });
+const EXAMPLE_SET = {
+  title: 'High press v playing out from the back',
+  scenarios: [
+    {
+      name: 'Short to the split centre-back',
+      theyDo: 'Their keeper rolls it to the left centre-back, who has split wide to the edge of the box.',
+      weDo: '#11 curves his press from the inside so the centre-back can only go down the line, where #3 jumps their full-back.',
+      cues: ['Keeper’s head goes down to the ball', 'Centre-back opens his body towards the touchline', 'Their full-back is still facing his own goal'],
+      risk: 'If #11 runs straight at him, the inside pass to their #10 opens and the press is bypassed.',
+      homeFormation: '4-3-3', awayFormation: '4-3-3', ball: { x: 99.6, y: 34 },
+      home: [P(1, 38, 34), P(3, 60, 10, 74, 8, 0.1), P(4, 56, 26), P(5, 56, 42), P(2, 60, 58), P(6, 68, 34, 72, 31),
+        P(8, 76, 24, 80, 23), P(10, 76, 44, 79, 45), P(11, 84, 22, 92, 16, -0.35), P(9, 86, 34, 92, 31, 0.2), P(7, 84, 50, 90, 52)],
+      away: [P(1, 101, 34), P(2, 84, 5, 82, 4), P(5, 95, 15), P(4, 95, 53), P(3, 84, 63), P(6, 88, 34, 86, 30),
+        P(10, 80, 22), P(8, 80, 46), P(7, 66, 9), P(9, 62, 34), P(11, 66, 59)],
+      pass: { team: 'away', to: 5 },
+    },
+    {
+      name: 'Pivot drops between the centre-backs',
+      theyDo: 'Their #6 drops between the centre-backs to receive from the keeper and turn.',
+      weDo: '#9 bends his run across the keeper’s passing line to the pivot, cutting it out before it starts.',
+      cues: ['#6 backs off his marker towards his own box', 'Centre-backs split to the width of the box', 'Keeper steps up with the ball'],
+      risk: 'If #9 arrives late or too straight, the keeper finds the pivot facing forward and our front three are behind the ball.',
+      homeFormation: '4-3-3', awayFormation: '4-3-3', ball: { x: 99.6, y: 34 },
+      home: [P(1, 40, 34), P(3, 58, 9), P(4, 55, 26), P(5, 55, 42), P(2, 58, 59), P(6, 68, 34, 74, 34),
+        P(8, 76, 22, 81, 23), P(10, 76, 46, 81, 45), P(11, 85, 16, 90, 14), P(9, 86, 28, 95, 34.6, -0.3), P(7, 85, 52, 90, 54)],
+      away: [P(1, 101, 34), P(2, 82, 4), P(5, 95, 13), P(4, 95, 55), P(3, 82, 64), P(6, 88, 34, 93, 34),
+        P(10, 80, 24), P(8, 80, 44), P(7, 66, 9), P(9, 62, 34), P(11, 66, 59)],
+      pass: { team: 'away', to: 6 },
+    },
+    {
+      name: 'Long to the target man',
+      theyDo: 'With every short option pressed, the keeper goes long to their #9 on halfway.',
+      weDo: '#5 steps onto the target man before the ball lands while #6 drops to cover the knock-down.',
+      cues: ['Keeper takes an extra touch and looks up', 'Their #9 turns his back to our goal', 'Their midfielders push up for the second ball'],
+      risk: 'If #5 stays on the line, their #9 wins the header and their midfield runs onto the second ball behind our press.',
+      homeFormation: '4-3-3', awayFormation: '4-3-3', ball: { x: 99.6, y: 34 },
+      home: [P(1, 40, 34), P(3, 58, 9), P(4, 55, 27), P(5, 54, 40, 60.5, 34.5, 0.2), P(2, 58, 59), P(6, 68, 34, 64, 36),
+        P(8, 80, 22), P(10, 80, 46), P(11, 90, 16), P(9, 93, 30), P(7, 90, 52)],
+      away: [P(1, 101, 34), P(2, 82, 4), P(5, 95, 14), P(4, 95, 54), P(3, 82, 64), P(6, 88, 34),
+        P(10, 80, 24, 70, 28), P(8, 80, 44, 70, 42), P(7, 66, 9), P(9, 64, 36, 61, 33), P(11, 66, 59)],
+      pass: { team: 'away', to: 9 },
+    },
+  ],
+};
+
+const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(+v) ? +v : NaN);
+
+// Rebuild one side from a formation, placing each slot from the entry with
+// the same shirt number, or failing that the next unused entry.
+function validateSide(entries, team, formation) {
+  if (!Array.isArray(entries) || entries.length !== 11) return null;
+  const clean = entries.map((e) => ({ num: num(e?.num), x: num(e?.x), y: num(e?.y), run: e?.run }));
+  if (clean.some((e) => !Number.isFinite(e.x) || !Number.isFinite(e.y))) return null;
+  const used = new Set();
+  return FORMATIONS[formation].map((slot) => {
+    let i = clean.findIndex((e, k) => !used.has(k) && e.num === slot[4]);
+    if (i < 0) i = clean.findIndex((_, k) => !used.has(k));
+    used.add(i);
+    const e = clean[i], pos = cleanPt(e);
+    let run = null;
+    if (e.run && Number.isFinite(num(e.run.x)) && Number.isFinite(num(e.run.y))) {
+      const end = cleanPt({ x: num(e.run.x), y: num(e.run.y) });
+      const d = dist(pos, end);
+      if (d > RUN_CAP) { end.x = pos.x + ((end.x - pos.x) * RUN_CAP) / d; end.y = pos.y + ((end.y - pos.y) * RUN_CAP) / d; }
+      if (dist(pos, end) >= 2) run = { ...end, bend: clamp(num(e.run.bend) || 0, -MAX_BEND, MAX_BEND) };
+    }
+    return { num: slot[4], ...pos, run };
+  });
+}
+
+function validateScenario(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const homeFormation = FORMATIONS[raw.homeFormation] ? raw.homeFormation : state.formations.home;
+  const awayFormation = FORMATIONS[raw.awayFormation] ? raw.awayFormation : state.formations.away;
+  const home = validateSide(raw.home, 'home', homeFormation);
+  const away = validateSide(raw.away, 'away', awayFormation);
+  if (!home || !away) return null;
+  const ball = isPt({ x: num(raw.ball?.x), y: num(raw.ball?.y) }) ? cleanPt({ x: num(raw.ball.x), y: num(raw.ball.y) }) : null;
+  let pass = null;
+  if (raw.pass && (raw.pass.team === 'home' || raw.pass.team === 'away')) {
+    const side = raw.pass.team === 'home' ? home : away;
+    if (side.some((p) => p.num === num(raw.pass.to))) pass = { team: raw.pass.team, to: num(raw.pass.to) };
+  }
+  const cues = (Array.isArray(raw.cues) ? raw.cues : []).map((c) => str(c, 140)).filter(Boolean).slice(0, 4);
+  return {
+    name: str(raw.name, 60) || 'Untitled scenario', theyDo: str(raw.theyDo, 280), weDo: str(raw.weDo, 280),
+    cues, risk: str(raw.risk, 280), homeFormation, awayFormation, home, away, ball, pass,
+  };
+}
+
+function validateScenarioSet(raw) {
+  const list = Array.isArray(raw) ? raw : raw?.scenarios;
+  if (!Array.isArray(list)) throw new AIError('The model’s reply had no scenarios in it.');
+  const scenarios = list.slice(0, 4).map(validateScenario).filter(Boolean);
+  if (!scenarios.length) throw new AIError('None of the model’s scenarios were usable (each side needs 11 players with coordinates).');
+  return { title: str(raw.title, 80) || 'Scenarios', scenarios, dropped: Math.min(list.length, 4) - scenarios.length };
+}
+
+// Put a validated scenario on the board and make it the base, so B replays it.
+function loadScenario(s) {
+  if (anim || state.match) return;
+  setupMatch(s.homeFormation, s.awayFormation);
+  for (const team of ['home', 'away']) {
+    const side = team === 'home' ? s.home : s.away;
+    state.players.filter((p) => p.team === team).forEach((p, i) => {
+      Object.assign(p, { x: side[i].x, y: side[i].y, run: side[i].run ? { ...side[i].run } : null });
+    });
+  }
+  // The ball must sit with someone on the passing side if there is a pass.
+  const passTeam = s.pass?.team;
+  const holder = passTeam ? nearestTo(s.ball || { x: PITCH.L / 2, y: PITCH.W / 2 }, passTeam) : null;
+  if (s.ball) state.ball = { ...s.ball };
+  if (holder && dist(holder, state.ball) > CARRY_R) giveBall(holder);
+  state.showAway = true;
+  if (s.pass) {
+    const passer = carrier();
+    const receiver = state.players.find((p) => p.team === s.pass.team && p.num === s.pass.to);
+    if (passer && receiver && passer !== receiver) {
+      const f = finalPos(receiver);
+      state.pendingPass = { passerId: passer.id, receiverId: receiver.id, x: f.x, y: f.y };
+    }
+  }
+  for (const p of state.players) { p.base = { x: p.x, y: p.y }; p.baseRun = copyRun(p.run); }
+  state.baseBall = { ...state.ball };
+  state.basePass = state.pendingPass ? { ...state.pendingPass } : null;
+}
+
+function scenarioPrompt(description) {
+  return `You are a football (soccer) coach designing drills on a tactics board. The user describes a situation; design 2 to 4 distinct scenarios for it. Each scenario is one phase of play lasting about 2 seconds.
+
+Coordinates are metres on a 105 × 68 pitch. x = 0 is the HOME goal line and x = 105 the AWAY goal line; y = 0 is the touchline on the home team's left as they attack towards x = 105. "We" / "us" are the HOME team (blue). The away team (red) attacks towards x = 0. Goal mouths span y = 30.34 to 37.66; penalty areas are 16.5 m deep.
+
+Formations available (use these names exactly): ${Object.keys(FORMATIONS).join(', ')}.
+Shirt numbers by formation (in slot order): ${Object.entries(FORMATIONS).map(([f, s]) => `${f}: ${s.map((q) => `${q[4]} ${q[2]}`).join(', ')}`).join(' | ')}.
+
+How the board resolves a pass (runs finish first, then the ball is judged against where everyone ends up):
+- A ground pass (35 m or shorter) is intercepted by any defender whose projection falls on the ball's straight path and who is within 1.0 + 0.045 × pass length metres of it.
+- A pass over 35 m is lofted: it clears everyone in transit but is lost if a defender ends within 4 m of the landing point.
+- Runs are at most 20 m. A run's "bend" in [-0.7, 0.7] curves it: positive bends towards the left of the direction of travel.
+
+For each scenario give all 22 starting positions, a run for each player who moves (null otherwise), the ball's position (at the feet of the player who has it), and optionally one pass by the team in possession, named by the receiver's shirt number. Keep it realistic: players 2+ m apart, the ball within 2 m of its carrier.
+
+Reply with JSON only, no prose, in exactly this shape:
+{"title": "short title", "scenarios": [{"name": "…", "theyDo": "one sentence", "weDo": "one sentence", "cues": ["2 to 4 short triggers to watch for"], "risk": "one sentence on what goes wrong", "homeFormation": "4-3-3", "awayFormation": "4-4-2", "ball": {"x": 0, "y": 0}, "home": [{"num": 1, "x": 0, "y": 0, "run": null}], "away": [{"num": 1, "x": 0, "y": 0, "run": {"x": 0, "y": 0, "bend": 0}}], "pass": {"team": "home", "to": 9}}]}
+Each of "home" and "away" must list all 11 players.
+
+The situation: ${description}`;
+}
+
+let scenarioSet = null, scenarioIdx = -1, scenarioBusy = null, scenarioStatus = '';
+
+async function buildScenarios() {
+  const text = $('#scenario-text').value.trim();
+  if (!text) { scenarioStatus = 'Describe a situation first, or load the example.'; renderScenarioUI(); return; }
+  scenarioBusy = new AbortController();
+  scenarioStatus = 'Asking the model…';
+  renderScenarioUI();
+  try {
+    const raw = await askClaude(scenarioPrompt(text), {
+      json: true, signal: scenarioBusy.signal, maxTokens: 16000,
+      onText: (_, all) => { $('#scenario-status').textContent = `Building… ${all.length} characters received`; },
+    });
+    setScenarioSet(validateScenarioSet(raw));
+    scenarioStatus = scenarioSet.dropped ? `${scenarioSet.dropped} scenario(s) were malformed and skipped.` : '';
+  } catch (err) {
+    scenarioStatus = err.name === 'AbortError' ? 'Cancelled.' : `${err.message}${err.unavailable ? ' The built-in example still works.' : ''}`;
+  }
+  scenarioBusy = null;
+  renderScenarioUI();
+}
+
+function setScenarioSet(set) {
+  scenarioSet = set;
+  scenarioIdx = -1;
+  store.set('tacticsLab.scenarios.v1', set);
+}
+
+function renderScenarioUI() {
+  const busy = !!scenarioBusy;
+  $('#scenario-text').disabled = busy;
+  $('#scenario-build').hidden = busy;
+  $('#scenario-cancel').hidden = !busy;
+  $('#scenario-example').disabled = busy;
+  $('#scenario-status').textContent = scenarioStatus;
+  const s = scenarioSet && scenarioSet.scenarios[scenarioIdx];
+  setHTML($('#scenario-ui'), `
+    ${scenarioSet ? `<div><b>${esc(scenarioSet.title)}</b></div><ul class="plain">${scenarioSet.scenarios.map((sc, i) =>
+      `<li><button class="btn${i === scenarioIdx ? ' primary' : ''} grow" style="text-align:left" data-scenario="${i}">${esc(sc.name)}</button></li>`).join('')}</ul>` : ''}
+    ${s ? `<dl class="stats" style="grid-template-columns:auto 1fr">
+      <dt>They</dt><dd style="text-align:left">${esc(s.theyDo)}</dd>
+      <dt>We</dt><dd style="text-align:left">${esc(s.weDo)}</dd>
+      <dt>Cues</dt><dd style="text-align:left">${s.cues.map(esc).join('<br>')}</dd>
+      <dt>Risk</dt><dd style="text-align:left">${esc(s.risk)}</dd></dl>
+      <div class="row"><button class="btn primary" id="scenario-play">▶ Play it</button><button class="btn" id="scenario-reset">Reset (B)</button></div>` : ''}`);
+}
+
+$('#scenario-build').addEventListener('click', buildScenarios);
+$('#scenario-cancel').addEventListener('click', () => scenarioBusy?.abort());
+$('#scenario-example').addEventListener('click', () => {
+  setScenarioSet(validateScenarioSet(EXAMPLE_SET));
+  scenarioStatus = '';
+  renderScenarioUI();
+});
+$('#scenario-ui').addEventListener('click', (ev) => {
+  const t = ev.target.closest('button');
+  if (!t) return;
+  if (t.id === 'scenario-play') play();
+  else if (t.id === 'scenario-reset') backToBase();
+  else if (t.dataset.scenario != null) {
+    scenarioIdx = +t.dataset.scenario;
+    loadScenario(scenarioSet.scenarios[scenarioIdx]);
+    setPanel(false);
+  }
+  renderScenarioUI();
+  requestRender();
+});
+try { const s = store.get('tacticsLab.scenarios.v1', null); if (s) scenarioSet = validateScenarioSet(s); } catch { scenarioSet = null; }
+renderScenarioUI();
+
+/* ================================================================
    Toolbar, toasts, shortcuts
    ================================================================ */
 function setTool(tool) {
@@ -1723,9 +1968,6 @@ function drawDebug() {
    Panel HTML is only rewritten when its content changes, so a drag
    doesn't thrash the DOM.
    ================================================================ */
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const who = (p) => `${p.team === 'home' ? 'Home' : 'Away'} #${p.num} ${p.role}`;
-function setHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
 
 function laneStats(lanes) {
   const open = lanes.filter((l) => !l.blocker);

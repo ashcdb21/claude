@@ -16,10 +16,13 @@
     }
     html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; }
     #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
+    #readout { position: fixed; left: 8px; top: 8px; margin: 0; padding: 6px 8px; font: 12px/1.4 ui-monospace, monospace;
+      color: #fff; background: rgba(0,0,0,0.55); border-radius: 6px; pointer-events: none; }
   </style>
 </head>
 <body>
   <canvas id="pitch"></canvas>
+  <pre id="readout"></pre>
 <script>
 'use strict';
 
@@ -69,6 +72,7 @@ const state = {
   players: [],
   ball: { x: 0, y: 0 },
   selected: null,                   // player id
+  coverage: 'control',              // 'control' | 'zones' | 'off'
 };
 
 // A player: current position, base position, and an optional run
@@ -108,6 +112,141 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function clampToPitch(pt) {
   pt.x = clamp(pt.x, 0, PITCH.L);
   pt.y = clamp(pt.y, 0, PITCH.W);
+}
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/* ================================================================
+   Analysis 1 — Zones (exact Voronoi)
+   Player i owns every point closer to i than to any other player j:
+     |p - pi|² <= |p - pj|²  <=>  (pj - pi)·p <= (|pj|² - |pi|²) / 2
+   Each cell starts as the pitch rectangle and is clipped by that
+   half-plane for every j (Sutherland–Hodgman against one edge).
+   ================================================================ */
+function clipHalfPlane(poly, a, b, c) {       // keep a*x + b*y <= c
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const P = poly[i], Q = poly[(i + 1) % poly.length];
+    const fp = a * P.x + b * P.y - c, fq = a * Q.x + b * Q.y - c;
+    if (fp <= 0) out.push(P);
+    if ((fp < 0 && fq > 0) || (fp > 0 && fq < 0)) {
+      const t = fp / (fp - fq);
+      out.push({ x: P.x + t * (Q.x - P.x), y: P.y + t * (Q.y - P.y) });
+    }
+  }
+  return out;
+}
+
+function polyArea(poly) {                     // shoelace
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const P = poly[i], Q = poly[(i + 1) % poly.length];
+    s += P.x * Q.y - Q.x * P.y;
+  }
+  return Math.abs(s) / 2;
+}
+
+function computeZones(players) {
+  const rect = [{ x: 0, y: 0 }, { x: PITCH.L, y: 0 }, { x: PITCH.L, y: PITCH.W }, { x: 0, y: PITCH.W }];
+  const zones = new Map();
+  for (const pi of players) {
+    let poly = rect;
+    for (const pj of players) {
+      if (pj === pi || (pj.x === pi.x && pj.y === pi.y)) continue;
+      poly = clipHalfPlane(poly, pj.x - pi.x, pj.y - pi.y, (pj.x ** 2 + pj.y ** 2 - pi.x ** 2 - pi.y ** 2) / 2);
+      if (poly.length < 3) break;
+    }
+    zones.set(pi.id, { poly, area: poly.length >= 3 ? polyArea(poly) : 0 });
+  }
+  return zones;
+}
+
+/* ================================================================
+   Analysis 2 — Pitch control
+   On a 0.5 m node grid, compare the nearest home and nearest away
+   distance and squash the difference through a logistic:
+     p = 1 / (1 + exp(-(d_away - d_home) / 2.6))
+   p is the home side's control of that node; its mean is the home
+   share of the pitch (away share = 1 - mean).
+   ================================================================ */
+const GRID = 0.5;
+const NX = Math.round(PITCH.L / GRID) + 1, NY = Math.round(PITCH.W / GRID) + 1;
+const controlP = new Float32Array(NX * NY);
+
+function computeControl(home, away) {
+  let sum = 0;
+  for (let j = 0; j < NY; j++) {
+    const y = j * GRID;
+    for (let i = 0; i < NX; i++) {
+      const x = i * GRID;
+      let dh = Infinity, da = Infinity;
+      for (const p of home) { const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < dh) dh = d; }
+      for (const p of away) { const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < da) da = d; }
+      let p;
+      if (dh === Infinity && da === Infinity) p = 0.5;
+      else if (da === Infinity) p = 1;
+      else if (dh === Infinity) p = 0;
+      else p = 1 / (1 + Math.exp(-(Math.sqrt(da) - Math.sqrt(dh)) / 2.6));
+      controlP[j * NX + i] = p;
+      sum += p;
+    }
+  }
+  return sum / (NX * NY);
+}
+
+// Marching squares over the node grid at p = 0.5. Returns line segments
+// [x0, y0, x1, y1] with each end linearly interpolated along a cell edge.
+function controlContour() {
+  const segs = [];
+  const at = (i, j) => controlP[j * NX + i];
+  // Point where p crosses 0.5 between nodes (i0,j0) and (i1,j1).
+  const lerp = (i0, j0, i1, j1) => {
+    const a = at(i0, j0), b = at(i1, j1);
+    const t = (0.5 - a) / (b - a);
+    return [(i0 + t * (i1 - i0)) * GRID, (j0 + t * (j1 - j0)) * GRID];
+  };
+  for (let j = 0; j < NY - 1; j++) {
+    for (let i = 0; i < NX - 1; i++) {
+      const c = (at(i, j) > 0.5 ? 1 : 0) | (at(i + 1, j) > 0.5 ? 2 : 0) | (at(i + 1, j + 1) > 0.5 ? 4 : 0) | (at(i, j + 1) > 0.5 ? 8 : 0);
+      if (c === 0 || c === 15) continue;
+      const top = () => lerp(i, j, i + 1, j), right = () => lerp(i + 1, j, i + 1, j + 1);
+      const bottom = () => lerp(i, j + 1, i + 1, j + 1), left = () => lerp(i, j, i, j + 1);
+      const add = (p, q) => segs.push([p[0], p[1], q[0], q[1]]);
+      switch (c) {
+        case 1: case 14: add(left(), top()); break;
+        case 2: case 13: add(top(), right()); break;
+        case 3: case 12: add(left(), right()); break;
+        case 4: case 11: add(right(), bottom()); break;
+        case 6: case 9: add(top(), bottom()); break;
+        case 7: case 8: add(left(), bottom()); break;
+        case 5: case 10: {
+          // Saddle: resolve with the cell-centre average.
+          const centre = (at(i, j) + at(i + 1, j) + at(i + 1, j + 1) + at(i, j + 1)) / 4 > 0.5;
+          if ((c === 5) === centre) { add(left(), bottom()); add(top(), right()); }
+          else { add(left(), top()); add(right(), bottom()); }
+        }
+      }
+    }
+  }
+  return segs;
+}
+
+/* ================================================================
+   Analysis pass: everything the renderer and readout need, recomputed
+   from scratch on every frame that changes the board.
+   ================================================================ */
+let A = null;   // latest analysis
+
+function analyse() {
+  const players = state.players;
+  const home = players.filter((p) => p.team === 'home');
+  const away = players.filter((p) => p.team === 'away');
+  const homeShare = computeControl(home, away);
+  A = {
+    zones: computeZones(players),
+    homeShare,
+    carrier: carrier(),
+  };
+  return A;
 }
 
 /* ================================================================
@@ -188,20 +327,32 @@ function lineWidthM(metres) {
 /* ================================================================
    Pitch markings (all at real dimensions)
    ================================================================ */
+// Canvas colours come from the CSS tokens; re-read when the theme changes.
+const colors = {};
+function readTokens() {
+  const css = getComputedStyle(document.documentElement);
+  for (const k of ['surround', 'grass', 'line', 'goal', 'home', 'away', 'select']) colors[k] = css.getPropertyValue('--' + k).trim();
+  colors.homeRGB = hexToRGB(colors.home);
+  colors.awayRGB = hexToRGB(colors.away);
+}
+function hexToRGB(h) {
+  const n = parseInt(h.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function drawPitch() {
   const { L, W } = PITCH;
-  const css = getComputedStyle(document.documentElement);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = css.getPropertyValue('--surround');
+  ctx.fillStyle = colors.surround;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   usePitchSpace();
-  ctx.fillStyle = css.getPropertyValue('--grass');
+  ctx.fillStyle = colors.grass;
   ctx.fillRect(-MARGIN, -MARGIN, L + 2 * MARGIN, W + 2 * MARGIN);
 
-  ctx.strokeStyle = css.getPropertyValue('--line');
-  ctx.fillStyle = css.getPropertyValue('--line');
+  ctx.strokeStyle = colors.line;
+  ctx.fillStyle = colors.line;
   ctx.lineWidth = lineWidthM(PITCH.lineW);
   ctx.lineJoin = 'miter';
 
@@ -233,7 +384,7 @@ function drawPitch() {
 
     // Goal frame behind the line.
     ctx.save();
-    ctx.strokeStyle = css.getPropertyValue('--goal');
+    ctx.strokeStyle = colors.goal;
     ctx.lineWidth = lineWidthM(0.12) * 1.5;
     ctx.strokeRect(Math.min(gx, gx - dir * PITCH.goalDepth), PITCH.goalY0, PITCH.goalDepth, PITCH.goalY1 - PITCH.goalY0);
     ctx.restore();
@@ -259,6 +410,60 @@ function dot(x, y, r) {
 }
 
 /* ================================================================
+   Coverage layers
+   Control is drawn as a tiny per-node image (one pixel per grid node)
+   scaled up with smoothing, so the tint is soft without per-cell paths.
+   ================================================================ */
+const tintCanvas = document.createElement('canvas');
+tintCanvas.width = NX; tintCanvas.height = NY;
+const tintCtx = tintCanvas.getContext('2d');
+const tintImage = tintCtx.createImageData(NX, NY);
+
+function drawControl() {
+  const d = tintImage.data, [hr, hg, hb] = colors.homeRGB, [ar, ag, ab] = colors.awayRGB;
+  for (let k = 0; k < NX * NY; k++) {
+    const p = controlP[k], home = p >= 0.5;
+    // Alpha ∝ |2p - 1|^0.9, capped at 0.35 so the grass reads through.
+    const a = 0.35 * Math.pow(Math.abs(2 * p - 1), 0.9);
+    d[k * 4] = home ? hr : ar; d[k * 4 + 1] = home ? hg : ag; d[k * 4 + 2] = home ? hb : ab;
+    d[k * 4 + 3] = a * 255;
+  }
+  tintCtx.putImageData(tintImage, 0, 0);
+  usePitchSpace();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, PITCH.L, PITCH.W); ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  // Pixel (i, j) is centred on node (i*GRID, j*GRID).
+  ctx.drawImage(tintCanvas, -GRID / 2, -GRID / 2, NX * GRID, NY * GRID);
+  ctx.restore();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = lineWidthM(0.18);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const [x0, y0, x1, y1] of controlContour()) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+  ctx.stroke();
+}
+
+function drawZones() {
+  usePitchSpace();
+  ctx.lineWidth = lineWidthM(0.12);
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  for (const p of state.players) {
+    const z = A.zones.get(p.id);
+    if (!z || z.poly.length < 3) continue;
+    ctx.beginPath();
+    z.poly.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+    ctx.closePath();
+    ctx.globalAlpha = p.id === state.selected ? 0.42 : 0.22;
+    ctx.fillStyle = colors[p.team];
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+  }
+}
+
+/* ================================================================
    Players and ball
    Sizes are in metres but floored in pixels so they stay legible and
    touchable on a phone, where 1 m can be ~5 px.
@@ -267,14 +472,12 @@ const playerR = () => Math.max(PLAYER_R, 7 / view.s);
 const ballR = () => Math.max(BALL_R, 3.5 / view.s);
 
 function drawPlayers() {
-  const css = getComputedStyle(document.documentElement);
-  const colour = { home: css.getPropertyValue('--home'), away: css.getPropertyValue('--away') };
   const r = playerR();
   const holder = carrier();
   usePitchSpace();
 
   for (const p of state.players) {
-    ctx.fillStyle = colour[p.team];
+    ctx.fillStyle = colors[p.team];
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = r * 0.14;
     ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -288,7 +491,7 @@ function drawPlayers() {
     }
     if (p.id === state.selected) {
       ctx.save();
-      ctx.strokeStyle = css.getPropertyValue('--select');
+      ctx.strokeStyle = colors.select;
       ctx.lineWidth = r * 0.2;
       ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.3, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
@@ -430,6 +633,19 @@ function drawDebug() {
 }
 
 /* ================================================================
+   Readout (minimal, replaced by the panel later)
+   ================================================================ */
+const readoutEl = document.getElementById('readout');
+function updateReadout() {
+  const sel = state.players.find((p) => p.id === state.selected);
+  const lines = [
+    `Space controlled — Home ${(A.homeShare * 100).toFixed(1)}%  ·  Away ${((1 - A.homeShare) * 100).toFixed(1)}%`,
+    sel ? `Selected ${sel.team} #${sel.num} ${sel.role} — zone ${A.zones.get(sel.id).area.toFixed(0)} m²` : 'Tap a player to see their zone',
+  ];
+  readoutEl.textContent = lines.join('\n');
+}
+
+/* ================================================================
    Render loop (on demand) and resize
    ================================================================ */
 let renderQueued = false;
@@ -438,13 +654,24 @@ function requestRender() {
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
+    analyse();
     drawPitch();
+    if (state.coverage === 'control') drawControl();
+    else if (state.coverage === 'zones') drawZones();
     if (DEBUG) drawDebug();
     drawPlayers();
+    updateReadout();
   });
 }
 
+readTokens();
 setupMatch('4-3-3', '4-4-2');
+window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'c' || ev.key === 'C') {
+    state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
+    requestRender();
+  }
+});
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
 // A devicePixelRatio change (moving between screens) doesn't always resize the element,

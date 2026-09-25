@@ -9,7 +9,7 @@ Each phase builds against a section of `SPEC.md`.
 | 0 | Scaffold: empty repo that runs | `index.html`, `server.js`, `SPEC.md`, `package.json`, `.env.example` | Done |
 | 1 | Pitch renderer (metre→pixel transform, markings, portrait rotation, ResizeObserver) | `index.html` | Done |
 | 2 | 22 players + ball, Move tool, 4-3-3 vs 4-4-2, carrier within 2.6 m | `index.html` | Done |
-| 3 | Voronoi zones (exact clipping) + pitch control (grid + logistic), minimal readout | `index.html` | |
+| 3 | Voronoi zones (exact clipping) + pitch control (grid + logistic), minimal readout | `index.html` | Done |
 | 4 | Passing lanes, "+n" lines broken, offside line, team shape | `index.html` | |
 | 5 | Runs tool, bend handle (both directions), Play animation | `index.html` | |
 | 6 | Pass tool + resolution (interception, 35 m lofted rule, into space, toasts, queue behind runs at ~30%) | `index.html` | |

@@ -16,16 +16,33 @@
       --offside: #fde047;
       --blocked: #f87171;
       --badge: #fde68a;
+      --homeRun: #bfdbfe;
+      --awayRun: #fecaca;
     }
     html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; }
     #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
     #readout { position: fixed; left: 8px; top: 8px; margin: 0; padding: 6px 8px; font: 12px/1.4 ui-monospace, monospace;
       color: #fff; background: rgba(0,0,0,0.55); border-radius: 6px; pointer-events: none; }
+    #toolbar { position: fixed; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+      display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.6); border-radius: 10px; }
+    #toolbar button { font: 600 14px system-ui, sans-serif; color: #fff; background: transparent; border: 0;
+      padding: 8px 12px; border-radius: 7px; cursor: pointer; }
+    #toolbar button[aria-pressed="true"] { background: rgba(255,255,255,0.22); }
+    #toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top)); transform: translateX(-50%);
+      padding: 8px 14px; border-radius: 8px; background: rgba(0,0,0,0.75); color: #fff; font: 600 14px system-ui, sans-serif;
+      opacity: 0; transition: opacity .2s; pointer-events: none; }
+    #toast.show { opacity: 1; }
   </style>
 </head>
 <body>
   <canvas id="pitch"></canvas>
   <pre id="readout"></pre>
+  <div id="toolbar" role="toolbar" aria-label="Tools">
+    <button data-tool="move" aria-pressed="true" title="Move (V)">Move</button>
+    <button data-tool="runs" aria-pressed="false" title="Runs (R)">Runs</button>
+    <button id="play" title="Play (Space)">▶ Play</button>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
 <script>
 'use strict';
 
@@ -78,6 +95,8 @@ const state = {
   coverage: 'control',              // 'control' | 'zones' | 'off'
   possession: 'home',               // last team to have a carrier
   layers: { lanes: true, lines: true, offside: true, shape: true, roles: false },
+  tool: 'move',                     // 'move' | 'runs' | 'pass'
+  match: null,                      // match-play state when a game is running
 };
 
 // A player: current position, base position, and an optional run
@@ -467,7 +486,7 @@ function lineWidthM(metres) {
 const colors = {};
 function readTokens() {
   const css = getComputedStyle(document.documentElement);
-  for (const k of ['surround', 'grass', 'line', 'goal', 'home', 'away', 'select', 'offside', 'blocked', 'badge']) colors[k] = css.getPropertyValue('--' + k).trim();
+  for (const k of ['surround', 'grass', 'line', 'goal', 'home', 'away', 'select', 'offside', 'blocked', 'badge', 'homeRun', 'awayRun']) colors[k] = css.getPropertyValue('--' + k).trim();
   colors.homeRGB = hexToRGB(colors.home);
   colors.awayRGB = hexToRGB(colors.away);
 }
@@ -730,37 +749,112 @@ function drawPlayers() {
 }
 
 /* ================================================================
-   Move tool
+   Runs: geometry
+   A run is a quadratic Bézier from the player S to the end point E.
+   Its control point is pushed off the chord's midpoint M along the
+   chord's left unit normal n by a signed fraction of the chord length:
+     C = M + n × bend × |SE|
+   The curve passes through B(½) = M + n × bend × |SE| / 2, which is
+   where the handle sits. Dragging the handle to pointer Q solves back:
+     bend = 2 × ((Q - M) · n) / |SE|
+   so pulling it to either side of the chord gives the matching sign.
+   ================================================================ */
+const MAX_BEND = 0.7, SNAP_BEND = 0.04;
+
+function runGeom(from, run) {
+  const L = Math.max(dist(from, run), 1e-6);
+  const nx = -(run.y - from.y) / L, ny = (run.x - from.x) / L;
+  const M = { x: (from.x + run.x) / 2, y: (from.y + run.y) / 2 };
+  const k = run.bend * L;
+  return {
+    S: { x: from.x, y: from.y }, E: { x: run.x, y: run.y }, M, L, nx, ny,
+    C: { x: M.x + nx * k, y: M.y + ny * k },
+    H: { x: M.x + nx * k / 2, y: M.y + ny * k / 2 },
+  };
+}
+
+function bezier(g, t) {
+  const u = 1 - t;
+  return {
+    x: u * u * g.S.x + 2 * u * t * g.C.x + t * t * g.E.x,
+    y: u * u * g.S.y + 2 * u * t * g.C.y + t * t * g.E.y,
+  };
+}
+
+function bendFromHandle(g, q) {
+  const b = (2 * ((q.x - g.M.x) * g.nx + (q.y - g.M.y) * g.ny)) / g.L;
+  const c = clamp(b, -MAX_BEND, MAX_BEND);
+  return Math.abs(c) < SNAP_BEND ? 0 : c;
+}
+
+function drawRuns() {
+  usePitchSpace();
+  const r = playerR();
+  for (const p of state.players) {
+    if (!p.run || !visible(p)) continue;
+    const g = runGeom(anim ? anim.starts.get(p) || p : p, p.run);
+    ctx.strokeStyle = colors[p.team + 'Run'];
+    ctx.lineWidth = lineWidthM(0.3);
+    ctx.globalAlpha = anim ? 0.35 : 0.95;
+    ctx.setLineDash([1, 0.7]);
+    ctx.beginPath(); ctx.moveTo(g.S.x, g.S.y); ctx.quadraticCurveTo(g.C.x, g.C.y, g.E.x, g.E.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // Arrowhead along the end tangent (E - C).
+    const tl = Math.hypot(g.E.x - g.C.x, g.E.y - g.C.y) || 1;
+    const tx = (g.E.x - g.C.x) / tl, ty = (g.E.y - g.C.y) / tl, h = r * 0.9;
+    ctx.fillStyle = colors[p.team + 'Run'];
+    ctx.beginPath();
+    ctx.moveTo(g.E.x, g.E.y);
+    ctx.lineTo(g.E.x - tx * h - ty * h * 0.55, g.E.y - ty * h + tx * h * 0.55);
+    ctx.lineTo(g.E.x - tx * h + ty * h * 0.55, g.E.y - ty * h - tx * h * 0.55);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (anim || state.match) continue;
+    // Bend handle.
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = colors[p.team];
+    ctx.lineWidth = r * 0.18;
+    ctx.beginPath(); ctx.arc(g.H.x, g.H.y, r * 0.45, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ================================================================
+   Interaction
    Hit-testing is done in metres against a touch-sized radius. The
    pointer keeps its grab offset so nothing jumps under the finger.
    Dragging the carrier moves the ball with them, keeping the ball at
    the same offset from their feet.
    ================================================================ */
-let drag = null;   // { kind: 'player' | 'ball', target, dx, dy, carried: {dx, dy} | null }
+let drag = null;
 
 function pointerPitch(ev) {
   const r = canvas.getBoundingClientRect();
   return toPitch(ev.clientX - r.left, ev.clientY - r.top);
 }
 
-// Nearest draggable thing to the pointer within a finger-sized radius.
-// The ball is tested alongside players so it can be grabbed off a carrier's feet.
-function hitTest(pt) {
+// Nearest thing under the pointer that the current tool can act on.
+// Small targets (ball, run handles, run ends) win ties within half a
+// player radius, so they can be grabbed even when sitting on a player.
+function hitTest(pt, tool = state.tool) {
   const reach = Math.max(playerR() * 1.3, 22 / view.s);
+  const bias = playerR() * 0.5;
   let best = null, bestD = reach;
+  const consider = (kind, target, d) => { if (d < bestD) { best = { kind, target }; bestD = d; } };
   for (const p of state.players) {
-    const d = Math.hypot(pt.x - p.x, pt.y - p.y);
-    if (d < bestD) { best = { kind: 'player', target: p }; bestD = d; }
+    if (!visible(p)) continue;
+    consider('player', p, dist(pt, p));
+    if (p.run && tool !== 'pass') {
+      const g = runGeom(p, p.run);
+      consider('bend', p, dist(pt, g.H) - bias);
+      consider('runEnd', p, dist(pt, g.E) - bias);
+    }
   }
-  // The ball is small and usually sits at a carrier's feet, so it wins
-  // ties within half a player radius; a press on the carrier's centre
-  // still grabs the carrier.
-  const dBall = Math.hypot(pt.x - state.ball.x, pt.y - state.ball.y) - playerR() * 0.5;
-  if (dBall < bestD) best = { kind: 'ball', target: state.ball };
+  if (tool !== 'runs') consider('ball', state.ball, dist(pt, state.ball) - bias);
   return best;
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
+  if (anim) return;
   const pt = pointerPitch(ev);
   const hit = hitTest(pt);
   if (!hit) {
@@ -768,13 +862,17 @@ canvas.addEventListener('pointerdown', (ev) => {
     requestRender();
     return;
   }
-  canvas.setPointerCapture(ev.pointerId);
   const t = hit.target;
-  drag = { ...hit, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null };
+  drag = { kind: hit.kind, target: t, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null, start: pt };
   if (hit.kind === 'player') {
     state.selected = t.id;
-    if (carrier() === t) drag.carried = { dx: state.ball.x - t.x, dy: state.ball.y - t.y };
+    if (state.tool === 'runs') drag.kind = 'newRun';
+    else if (carrier() === t) drag.carried = { dx: state.ball.x - t.x, dy: state.ball.y - t.y };
+  } else if (hit.kind === 'bend' || hit.kind === 'runEnd') {
+    state.selected = t.id;
+    drag.dx = t.run.x - pt.x; drag.dy = t.run.y - pt.y;
   }
+  canvas.setPointerCapture(ev.pointerId);
   canvas.style.cursor = 'grabbing';
   requestRender();
 });
@@ -783,29 +881,136 @@ canvas.addEventListener('pointermove', (ev) => {
   const pt = pointerPitch(ev);
   if (DEBUG) debugPointer = toScreen(pt.x, pt.y);
   if (!drag || ev.pointerId !== drag.pointerId) {
-    if (ev.pointerType === 'mouse') canvas.style.cursor = hitTest(pt) ? 'grab' : 'default';
+    if (ev.pointerType === 'mouse' && !anim) canvas.style.cursor = hitTest(pt) ? 'grab' : 'default';
     if (DEBUG) requestRender();
     return;
   }
   const t = drag.target;
-  t.x = pt.x + drag.dx;
-  t.y = pt.y + drag.dy;
-  clampToPitch(t);
-  if (drag.carried) {
-    state.ball.x = t.x + drag.carried.dx;
-    state.ball.y = t.y + drag.carried.dy;
-    clampToPitch(state.ball);
+  switch (drag.kind) {
+    case 'player': case 'ball':
+      t.x = pt.x + drag.dx;
+      t.y = pt.y + drag.dy;
+      clampToPitch(t);
+      if (drag.carried) {
+        state.ball.x = t.x + drag.carried.dx;
+        state.ball.y = t.y + drag.carried.dy;
+        clampToPitch(state.ball);
+      }
+      break;
+    case 'newRun': {
+      // Only becomes a run once the pointer has clearly left the player.
+      if (!drag.moved && dist(pt, drag.start) < 1.5) break;
+      drag.moved = true;
+      const end = { x: pt.x, y: pt.y };
+      clampToPitch(end);
+      t.run = { x: end.x, y: end.y, bend: 0 };
+      break;
+    }
+    case 'runEnd': {
+      const end = { x: pt.x + drag.dx, y: pt.y + drag.dy };
+      clampToPitch(end);
+      t.run.x = end.x; t.run.y = end.y;
+      break;
+    }
+    case 'bend':
+      t.run.bend = bendFromHandle(runGeom(t, t.run), pt);
+      break;
   }
   requestRender();
 });
 
 function endDrag(ev) {
   if (!drag || ev.pointerId !== drag.pointerId) return;
+  // Runs too short to read as movement are dropped.
+  if ((drag.kind === 'newRun' || drag.kind === 'runEnd') && drag.target.run && dist(drag.target, drag.target.run) < 2) {
+    drag.target.run = null;
+  }
   drag = null;
   canvas.style.cursor = ev.pointerType === 'mouse' && hitTest(pointerPitch(ev)) ? 'grab' : 'default';
+  requestRender();
 }
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
+
+/* ================================================================
+   Play
+   All runs animate together over 2.2 s with an ease-in-out, each along
+   its own Bézier. A carrier with a run dribbles: the ball keeps its
+   offset from their feet. Analysis recomputes every frame.
+   ================================================================ */
+const PLAY_MS = 2200;
+let anim = null;
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function play() {
+  if (anim || state.match) return;
+  const movers = state.players.filter((p) => p.run && visible(p));
+  if (!movers.length) { toast('Nothing to play yet: draw a run first'); return; }
+  const holder = carrier();
+  anim = {
+    t0: performance.now(),
+    dur: PLAY_MS,
+    starts: new Map(movers.map((p) => [p, { x: p.x, y: p.y }])),
+    geoms: new Map(movers.map((p) => [p, runGeom(p, p.run)])),
+    dribble: holder && holder.run ? { p: holder, dx: state.ball.x - holder.x, dy: state.ball.y - holder.y } : null,
+  };
+  requestAnimationFrame(tick);
+}
+
+function tick(now) {
+  if (!anim) return;
+  const raw = clamp((now - anim.t0) / anim.dur, 0, 1);
+  const e = easeInOut(raw);
+  for (const [p, g] of anim.geoms) Object.assign(p, bezier(g, e));
+  if (anim.dribble) {
+    state.ball.x = anim.dribble.p.x + anim.dribble.dx;
+    state.ball.y = anim.dribble.p.y + anim.dribble.dy;
+    clampToPitch(state.ball);
+  }
+  if (raw >= 1) finishPlay();
+  else requestAnimationFrame(tick);
+  requestRender();
+}
+
+function finishPlay() {
+  for (const p of anim.geoms.keys()) { clampToPitch(p); p.run = null; }
+  anim = null;
+}
+
+/* ================================================================
+   Toolbar, toasts, shortcuts
+   ================================================================ */
+function setTool(tool) {
+  state.tool = tool;
+  for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
+  requestRender();
+}
+for (const b of document.querySelectorAll('[data-tool]')) b.addEventListener('click', () => setTool(b.dataset.tool));
+document.getElementById('play').addEventListener('click', play);
+
+let toastTimer = 0;
+function toast(msg, kind = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.className = kind), 2600);
+}
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.target.closest('input, textarea, select') || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const k = ev.key.toLowerCase();
+  if (k === 'v') setTool('move');
+  else if (k === 'r') setTool('runs');
+  else if (k === ' ') { ev.preventDefault(); play(); }
+  else if (k === 'c') state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
+  else if (k === 'escape') state.selected = null;
+  else if (k === 'delete' || k === 'backspace') {
+    const p = state.players.find((q) => q.id === state.selected);
+    if (p && p.run && !anim) p.run = null;
+  } else return;
+  requestRender();
+});
 
 /* ================================================================
    Debug overlay (?debug): a known-coordinate marker, attack arrow,
@@ -887,6 +1092,7 @@ function requestRender() {
     if (state.layers.shape) drawShape();
     if (state.layers.offside) drawOffside();
     if (state.layers.lanes) { drawLanes(A.selLanes, true); drawLanes(A.lanes, false); }
+    drawRuns();
     if (DEBUG) drawDebug();
     drawPlayers();
     updateReadout();
@@ -895,12 +1101,7 @@ function requestRender() {
 
 readTokens();
 setupMatch('4-3-3', '4-4-2');
-window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'c' || ev.key === 'C') {
-    state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
-    requestRender();
-  }
-});
+
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
 // A devicePixelRatio change (moving between screens) doesn't always resize the element,

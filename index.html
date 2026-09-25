@@ -70,6 +70,8 @@
       #toolbar button { padding: 8px 9px; font-size: 15px; letter-spacing: .02em; }
       #toolbar .wide { display: none; }
     }
+    #toolbar button:disabled { opacity: .35; cursor: default; }
+    #lockin { background: var(--accent) !important; }
     #toolbar .sep { width: 1px; background: rgba(255,255,255,0.25); margin: 6px 2px; }
     #toast { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translateX(-50%);
       padding: 8px 14px; border-radius: 8px; background: rgba(15,23,42,0.85); color: #fff; font-weight: 600;
@@ -134,6 +136,7 @@
       <button data-tool="pass" aria-pressed="false" title="Pass (P)">Pass</button>
       <span class="sep"></span>
       <button id="play" title="Play (Space)">▶<span class="wide"> Play</span></button>
+      <button id="lockin" hidden>Lock in</button>
       <button id="panel-open" aria-controls="panel" aria-expanded="false" aria-label="Panel">☰<span class="wide"> Panel</span></button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
@@ -1246,7 +1249,7 @@ function hitTest(pt, tool = state.tool) {
       consider('runEnd', p, dist(pt, g.E) - bias);
     }
   }
-  if (tool !== 'runs') consider('ball', state.ball, dist(pt, state.ball) - bias);
+  if (tool !== 'runs' && !state.match) consider('ball', state.ball, dist(pt, state.ball) - bias);
   return best;
 }
 
@@ -1260,6 +1263,11 @@ canvas.addEventListener('pointerdown', (ev) => {
     return;
   }
   const t = hit.target;
+  if (state.match && (hit.kind !== 'player' || t.team !== 'home' || state.match.status !== 'defending')) {
+    if (hit.kind === 'player') state.selected = t.id;
+    requestRender();
+    return;
+  }
   drag = { kind: hit.kind, target: t, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null, start: pt };
   if (state.tool === 'pass' && hit.kind === 'ball') {
     const passer = carrier();
@@ -1300,7 +1308,8 @@ canvas.addEventListener('pointermove', (ev) => {
       t.x = pt.x + drag.dx;
       t.y = pt.y + drag.dy;
       clampToPitch(t);
-      if (drag.carried) {
+      if (state.match) constrainDefender(t);
+      else if (drag.carried) {
         state.ball.x = t.x + drag.carried.dx;
         state.ball.y = t.y + drag.carried.dy;
         clampToPitch(state.ball);
@@ -1421,7 +1430,7 @@ const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) 
 // With runs, the pass is released 30% of the way in and lands as the
 // runs finish; a pass on its own plays straight away at ball speed.
 function play() {
-  if (anim) return;
+  if (anim || state.match) return;
   const movers = state.players.filter((p) => p.run && visible(p));
   const pp = state.pendingPass;
   let pass = null;
@@ -1432,6 +1441,14 @@ function play() {
     else toast('Pass cancelled: the passer no longer has the ball', 'bad');
   }
   if (!movers.length && !pass) { if (!pp) toast('Nothing to play yet: draw a run or a pass'); requestRender(); return; }
+  startAnim(movers, pass);
+}
+
+// Animate `movers` along their runs, with an optional ball flight
+// { passer, to, receiver, outcome? }. Without a precomputed outcome the
+// pass is resolved here. opts.silent suppresses the toast; opts.extra is
+// handed to onPlayFinished.
+function startAnim(movers, pass, opts = {}) {
   const holder = carrier();
   anim = {
     t0: performance.now(),
@@ -1440,17 +1457,20 @@ function play() {
     geoms: new Map(movers.map((p) => [p, runGeom(p, p.run)])),
     dribble: holder ? { p: holder, dx: state.ball.x - holder.x, dy: state.ball.y - holder.y } : null,
     pass: null,
+    silent: !!opts.silent,
+    extra: opts.extra,
   };
   if (pass) {
     const releaseT = movers.length ? RELEASE_AT : 0;
     const g = anim.geoms.get(pass.passer);
     const at = g ? bezier(g, easeInOut(releaseT)) : pass.passer;
-    const from = { x: at.x + anim.dribble.dx, y: at.y + anim.dribble.dy, id: pass.passer.id };
-    const outcome = resolvePass(pass.passer.team, from, pass.to, pass.receiver);
+    const off = anim.dribble || { dx: 0, dy: 0 };
+    const from = { x: at.x + off.dx, y: at.y + off.dy, id: pass.passer.id };
+    const outcome = pass.outcome || resolvePass(pass.passer.team, from, pass.to, pass.receiver);
     const flightLen = dist(from, outcome.point);
     if (!movers.length) anim.dur = clamp(dist(from, pass.to) * 28, 450, 1400) + (outcome.lofted ? 300 : 0);
     // An interception meets the ball part-way along the full flight.
-    const arriveT = releaseT + (1 - releaseT) * (outcome.len > 0 ? flightLen / outcome.len : 1);
+    const arriveT = releaseT + (1 - releaseT) * (outcome.len > 0 ? clamp(flightLen / outcome.len, 0, 1) : 1);
     anim.pass = { from, outcome, releaseT, arriveT };
   }
   requestAnimationFrame(tick);
@@ -1487,15 +1507,15 @@ function tick(now) {
 
 function finishPlay() {
   for (const p of anim.geoms.keys()) { clampToPitch(p); p.run = null; }
-  const pass = anim.pass;
+  const { pass, silent, extra } = anim;
   anim = null;
   state.ballLift = 0;
   if (pass) {
     if (pass.outcome.winner) giveBall(pass.outcome.winner);
-    else { state.ball = { ...pass.outcome.point }; clampToPitch(state.ball); }
-    passToast(pass.outcome);
+    else state.ball = { ...pass.outcome.point };
+    if (!silent) passToast(pass.outcome);
   }
-  onPlayFinished(pass && pass.outcome);
+  onPlayFinished(pass && pass.outcome, extra);
 }
 let onPlayFinished = () => {};
 
@@ -1886,6 +1906,452 @@ try { const s = store.get('tacticsLab.scenarios.v1', null); if (s) scenarioSet =
 renderScenarioUI();
 
 /* ================================================================
+   Match play
+   Turn-based: the opponent (away, attacking towards x = 0) attacks, you
+   defend. Each phase you may move each of your players within a ring
+   around where they started the phase, never within 1.6 m of the ball.
+   On lock-in the attacker plans runs (≤ 12 m) and one action, and the
+   same engine that runs the board resolves it:
+   • pass: resolvePass(), and offside if the receiver was beyond your
+     offside line when the phase started;
+   • dribble (≤ 8 m): lost if a defender is within 1.6 m of the path;
+   • shoot: five lanes across the goal mouth, a lane is blocked by an
+     outfielder within 1 m of it; on the clearest lane the keeper saves
+     if within 1.2 + 0.07 × shot length of it; otherwise it scores with
+     probability clamp(1.1 − distance / 25, 0.1, 0.9).
+   You win on any turnover, block, save, miss or offside, or by
+   surviving every phase; they win by scoring or reaching the target.
+   ================================================================ */
+const RING = { easy: 12, normal: 9, hard: 6 };
+const BALL_KEEPOUT = 1.6, MATCH_RUN_CAP = 12, DRIBBLE_CAP = 8, DRIBBLE_TACKLE = 1.6;
+const SHOT_BLOCK = 1.0, GOAL_LANES = [30.84, 32.42, 34, 35.58, 37.16];
+const keeperReach = (len) => 1.2 + 0.07 * len;
+const shotOdds = (d) => clamp(1.1 - d / 25, 0.1, 0.9);
+const WIN_TEXT = {
+  half: 'get the ball into your half',
+  final3: 'get the ball into your defensive third (x < 35 m)',
+  box: 'get the ball into your penalty area',
+  score: 'score',
+};
+
+const PRESETS = [
+  {
+    name: 'Break our mid-block', win: 'final3', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'They build from the back against your 4-4-2 block. Keep them out of your defensive third for four phases.',
+    ball: { x: 78.6, y: 44 },
+    home: [P(1, 6, 34), P(3, 34, 10), P(4, 30, 27), P(5, 30, 41), P(2, 34, 58), P(11, 46, 12), P(8, 44, 28), P(6, 44, 40), P(7, 46, 56), P(9, 58, 30), P(10, 58, 40)],
+    away: [P(1, 100, 34), P(3, 74, 62), P(4, 80, 44), P(5, 82, 24), P(2, 74, 6), P(6, 68, 34), P(8, 60, 46), P(10, 60, 22), P(11, 50, 60), P(9, 46, 34), P(7, 50, 8)],
+  },
+  {
+    name: 'Stop the counter', win: 'box', phases: 3, homeFormation: '4-3-3', awayFormation: '4-4-2',
+    desc: 'You lost it high up the pitch with your full-backs forward. Keep them out of your box for three phases.',
+    ball: { x: 56.6, y: 30 },
+    home: [P(1, 14, 34), P(3, 52, 8), P(4, 40, 26), P(5, 40, 42), P(2, 54, 60), P(6, 56, 37), P(8, 64, 24), P(10, 64, 46), P(11, 74, 12), P(9, 78, 34), P(7, 74, 56)],
+    away: [P(1, 100, 34), P(3, 76, 60), P(4, 80, 42), P(5, 80, 26), P(2, 76, 8), P(11, 60, 58), P(8, 62, 42), P(6, 58, 30), P(7, 60, 10), P(9, 50, 44), P(10, 48, 24)],
+  },
+  {
+    name: 'Overload on our right', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'Their full-back, #8 and winger gang up on your right side. Stop them getting into the box for four phases.',
+    ball: { x: 56.6, y: 62 },
+    home: [P(1, 6, 34), P(3, 26, 14), P(4, 24, 28), P(5, 24, 40), P(2, 30, 56), P(11, 40, 16), P(8, 40, 30), P(6, 40, 42), P(7, 44, 58), P(9, 54, 30), P(10, 52, 44)],
+    away: [P(1, 98, 34), P(3, 58, 62), P(4, 70, 42), P(5, 72, 24), P(2, 62, 10), P(6, 60, 36), P(8, 50, 50), P(10, 52, 26), P(11, 38, 60), P(9, 36, 34), P(7, 40, 14)],
+  },
+  {
+    name: 'Edge of the box', win: 'score', phases: 3, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'They have it 28 m out with runners around your box. Don’t concede for three phases.',
+    ball: { x: 28.5, y: 36 },
+    home: [P(1, 3, 34), P(3, 14, 20), P(4, 13, 30), P(5, 13, 40), P(2, 14, 50), P(11, 22, 16), P(8, 22, 30), P(6, 22, 40), P(7, 24, 54), P(9, 36, 30), P(10, 38, 42)],
+    away: [P(1, 90, 34), P(3, 44, 62), P(4, 56, 44), P(5, 56, 26), P(2, 44, 8), P(6, 40, 34), P(8, 30, 36), P(10, 30, 24), P(11, 20, 58), P(9, 17, 34), P(7, 20, 10)],
+  },
+];
+
+const inOurBox = (p) => p.x <= PITCH.boxD && p.y >= (PITCH.W - PITCH.boxW) / 2 && p.y <= (PITCH.W + PITCH.boxW) / 2;
+function reachedTarget(win, pt) {
+  if (win === 'half') return pt.x < PITCH.L / 2;
+  if (win === 'final3') return pt.x < 35;
+  if (win === 'box') return inOurBox(pt);
+  return false;
+}
+const homeSide = () => state.players.filter((p) => p.team === 'home');
+const awaySide = () => state.players.filter((p) => p.team === 'away');
+
+// Keep a dragged defender inside their ring and out of the ball's 1.6 m.
+function constrainDefender(p) {
+  const m = state.match, s = m.starts.get(p.id), R = RING[m.difficulty];
+  for (let k = 0; k < 3; k++) {
+    const d = dist(p, s);
+    if (d > R) { p.x = s.x + ((p.x - s.x) * R) / d; p.y = s.y + ((p.y - s.y) * R) / d; }
+    const b = dist(p, state.ball);
+    if (b < BALL_KEEPOUT) {
+      const ux = b > 1e-6 ? (p.x - state.ball.x) / b : 1, uy = b > 1e-6 ? (p.y - state.ball.y) / b : 0;
+      p.x = state.ball.x + ux * BALL_KEEPOUT; p.y = state.ball.y + uy * BALL_KEEPOUT;
+    }
+    clampToPitch(p);
+  }
+}
+
+// --- Shots ------------------------------------------------------------
+function evaluateShot(from, at = finalPos) {
+  const keeper = homeSide().find((p) => p.unit === 'G');
+  const blockers = homeSide().filter((p) => p.unit !== 'G');
+  const lanes = GOAL_LANES.map((gy) => {
+    const to = { x: 0, y: gy }, len = dist(from, to);
+    const ux = (to.x - from.x) / len, uy = (to.y - from.y) / len;
+    const along = (q) => (q.x - from.x) * ux + (q.y - from.y) * uy;
+    const perp = (q) => Math.abs((q.x - from.x) * uy - (q.y - from.y) * ux);
+    let blocker = null, bt = Infinity;
+    for (const b of blockers) {
+      const q = at(b), t = along(q);
+      if (t > 0 && t < len && perp(q) < SHOT_BLOCK && t < bt) { blocker = b; bt = t; }
+    }
+    const kq = keeper && at(keeper);
+    const kPerp = kq && along(kq) > 0 ? perp(kq) : Infinity;
+    return { to, len, blocker, blockPoint: blocker && { x: from.x + ux * bt, y: from.y + uy * bt }, keeper, kMargin: kPerp - keeperReach(len) };
+  });
+  const open = lanes.filter((l) => !l.blocker);
+  const best = open.sort((a, b) => b.kMargin - a.kMargin)[0] || null;
+  const d = dist(from, { x: 0, y: 34 });
+  return { lanes, best, saved: best ? best.kMargin <= 0 : null, odds: best && best.kMargin > 0 ? shotOdds(d) : 0, d };
+}
+
+// --- Heuristic opponent -----------------------------------------------
+// Scores candidate run ends on free space, forward progress and whether
+// they open a pass from the ball; then picks the best uncut pass, a shot
+// when it's on, or else a dribble into the largest gap.
+function heuristicPlan() {
+  const m = state.match, holder = carrier(), ball = state.ball;
+  const home = homeSide(), away = awaySide();
+  const space = (pt) => Math.min(...home.map((h) => dist(h, pt)));
+  const ends = new Map();
+  const runs = [];
+  for (const p of away) {
+    if (p === holder || p.unit === 'G' || dist(p, ball) > 50) continue;
+    let best = { x: p.x, y: p.y }, bestS = -Infinity;
+    for (let a = 0; a < 16; a++) {
+      for (const r of [0, 6, 12]) {
+        if (r === 0 && a) continue;
+        const ang = (a / 16) * Math.PI * 2;
+        const c = { x: p.x + Math.cos(ang) * r, y: p.y + Math.sin(ang) * r };
+        if (c.x < 1 || c.x > PITCH.L - 1 || c.y < 1 || c.y > PITCH.W - 1) continue;
+        let s = Math.min(space(c), 10) + (p.x - c.x) * 0.35;
+        if (!laneBlockedByHome(ball, c)) s += 3;
+        for (const q of ends.values()) if (dist(q, c) < 6) s -= 3;
+        if (s > bestS) { bestS = s; best = c; }
+      }
+    }
+    ends.set(p.id, best);
+    if (dist(p, best) >= 2) runs.push({ num: p.num, x: best.x, y: best.y, bend: 0 });
+  }
+  const at = (q) => (q.team === 'away' && ends.has(q.id) ? ends.get(q.id) : { x: q.x, y: q.y });
+
+  // Shot?
+  const shot = evaluateShot(ball);
+  const lastChance = m.phase === m.total;
+  if (shot.d < 26 && shot.best && !shot.saved && (shot.odds >= 0.2 || lastChance)) {
+    return { runs, action: { type: 'shoot' }, thinking: `Your block leaves a clear lane at the ${shot.best.to.y < 34 ? 'near' : 'far'} side and your keeper can't cover it, so we shoot.` };
+  }
+  // Best uncut pass.
+  let pick = null;
+  for (const r of away) {
+    if (r === holder || m.offsideAtStart.has(r.id)) continue;
+    const to = at(r), o = resolvePass('away', ball, to, r, at);
+    if (o.result !== 'complete') continue;
+    const v = (ball.x - to.x) + 2 * linesBroken(ball, to, 'away') + 0.4 * Math.min(space(to), 10) + (reachedTarget(m.win, to) ? 30 : 0);
+    if (!pick || v > pick.v) pick = { r, to, v };
+  }
+  if (pick && pick.v > -8) {
+    const gap = Math.min(space(pick.to), 20);
+    const near = home.reduce((b, h) => (dist(h, pick.to) < dist(b, pick.to) ? h : b));
+    return { runs, action: { type: 'pass', to: pick.r.num }, thinking: `Your #${near.num} is ${gap.toFixed(0)} m from where our #${pick.r.num} ends up and nobody is on the line of the pass, so we play it.` };
+  }
+  // Dribble into the largest gap.
+  let dr = null;
+  for (let a = 0; a < 16; a++) {
+    const ang = (a / 16) * Math.PI * 2;
+    const end = cleanPt({ x: ball.x + Math.cos(ang) * DRIBBLE_CAP, y: ball.y + Math.sin(ang) * DRIBBLE_CAP });
+    const tackler = dribbleTackler(ball, end);
+    const v = (tackler ? -100 : 0) + Math.min(space(end), 12) + (ball.x - end.x) * 0.5 + (reachedTarget(m.win, end) ? 30 : 0);
+    if (!dr || v > dr.v) dr = { end, v };
+  }
+  return { runs, action: { type: 'dribble', x: dr.end.x, y: dr.end.y }, thinking: `Every pass is covered, but there are ${Math.min(space(dr.end), 12).toFixed(0)} m of space in front of the ball, so we carry it.` };
+}
+
+function laneBlockedByHome(from, to) {
+  const len = dist(from, to);
+  if (len < 1e-6) return false;
+  const ux = (to.x - from.x) / len, uy = (to.y - from.y) / len, r = len > LOFT_OVER ? 0 : interceptRadius(len);
+  return homeSide().some((h) => {
+    const t = (h.x - from.x) * ux + (h.y - from.y) * uy;
+    return len > LOFT_OVER ? dist(h, to) < LOFT_LOSE_R : t >= 0 && t <= len && Math.abs((h.x - from.x) * uy - (h.y - from.y) * ux) < r;
+  });
+}
+
+function dribbleTackler(from, to) {
+  const len = dist(from, to) || 1e-6;
+  const ux = (to.x - from.x) / len, uy = (to.y - from.y) / len;
+  let best = null, bt = Infinity;
+  for (const h of homeSide()) {
+    const t = clamp((h.x - from.x) * ux + (h.y - from.y) * uy, 0, len);
+    const d = Math.hypot(h.x - (from.x + ux * t), h.y - (from.y + uy * t));
+    if (d < DRIBBLE_TACKLE && t < bt) { best = h; bt = t; }
+  }
+  return best;
+}
+
+// Clamp a plan from either opponent into something the engine can run.
+function sanitizePlan(raw) {
+  const holder = carrier();
+  const away = awaySide();
+  const byNum = (n) => away.find((p) => p.num === num(n));
+  const runs = [];
+  for (const r of Array.isArray(raw?.runs) ? raw.runs : []) {
+    const p = byNum(r?.num);
+    if (!p || p === holder || runs.some((q) => q.p === p) || !Number.isFinite(num(r.x)) || !Number.isFinite(num(r.y))) continue;
+    const end = cleanPt({ x: num(r.x), y: num(r.y) }), d = dist(p, end);
+    if (d > MATCH_RUN_CAP) { end.x = p.x + ((end.x - p.x) * MATCH_RUN_CAP) / d; end.y = p.y + ((end.y - p.y) * MATCH_RUN_CAP) / d; }
+    if (dist(p, end) >= 1) runs.push({ p, run: { ...end, bend: clamp(num(r.bend) || 0, -MAX_BEND, MAX_BEND) } });
+  }
+  const a = raw?.action || {};
+  let action = null;
+  if (a.type === 'pass' && byNum(a.to) && byNum(a.to) !== holder) action = { type: 'pass', to: byNum(a.to) };
+  else if (a.type === 'shoot') action = { type: 'shoot' };
+  else if (a.type === 'dribble' && Number.isFinite(num(a.x)) && Number.isFinite(num(a.y))) {
+    const end = cleanPt({ x: num(a.x), y: num(a.y) }), d = dist(state.ball, end);
+    if (d > DRIBBLE_CAP) { end.x = state.ball.x + ((end.x - state.ball.x) * DRIBBLE_CAP) / d; end.y = state.ball.y + ((end.y - state.ball.y) * DRIBBLE_CAP) / d; }
+    action = { type: 'dribble', x: end.x, y: end.y };
+  }
+  if (!action) return null;
+  return { runs, action, thinking: str(raw.thinking, 300) || 'We look for the gap.' };
+}
+
+// --- Game flow ------------------------------------------------------------
+let matchBoard = null;   // the board to restore when the game ends
+
+function startMatch(setup, difficulty) {
+  if (anim) return;
+  if (!state.match) matchBoard = snapshot();
+  state.match = null;
+  const scenario = validateScenario({ ...setup, pass: null });
+  loadScenario(scenario);
+  state.pendingPass = state.basePass = null;
+  for (const p of state.players) { p.run = p.baseRun = null; }
+  const holder = nearestTo(setup.ball || state.ball, 'away');
+  if (!carrier() || carrier().team !== 'away') giveBall(holder);
+  state.match = {
+    setup, difficulty, win: setup.win, total: setup.phases, phase: 1, status: 'defending',
+    log: [], result: null, debrief: null, source: null,
+  };
+  beginPhase();
+  setTool('move');
+  state.selected = null;
+  toast(`Phase 1 of ${setup.phases}: set your shape, then lock in`);
+}
+
+function beginPhase() {
+  const m = state.match;
+  m.starts = new Map(homeSide().map((p) => [p.id, { x: p.x, y: p.y }]));
+  // Offside is judged from positions at the start of the phase.
+  const line = offsideLine('away');
+  m.offsideLineAtStart = line;
+  m.offsideAtStart = new Set(awaySide().filter((p) => p !== carrier() && p.x < line - 1e-9).map((p) => p.id));
+  m.status = 'defending';
+}
+
+async function lockIn() {
+  const m = state.match;
+  if (!m || m.status !== 'defending' || anim) return;
+  m.status = 'thinking';
+  renderMatchUI();
+  let plan = null;
+  try { plan = await getOpponentPlan(); } catch { plan = null; }
+  if (!state.match || state.match !== m) return;
+  if (!plan) { plan = sanitizePlan(heuristicPlan()); m.source = 'heuristic'; }
+  m.status = 'resolving';
+  renderMatchUI();
+  resolvePhase(plan);
+}
+
+// Replaced in the AI phase; the heuristic is the fallback either way.
+let getOpponentPlan = async () => null;
+
+function resolvePhase(plan) {
+  const m = state.match, holder = carrier();
+  for (const { p, run } of plan.runs) p.run = run;
+  const movers = plan.runs.map((r) => r.p);
+  const entry = { phase: m.phase, thinking: plan.thinking, source: m.source, action: '', outcome: '' };
+  const a = plan.action;
+  let pass = null, extra = { entry, plan };
+
+  if (a.type === 'pass') {
+    const to = finalPos(a.to);
+    entry.action = `Pass to #${a.to.num}`;
+    if (m.offsideAtStart.has(a.to.id)) {
+      extra.offside = true;
+      pass = { passer: holder, to, receiver: a.to, outcome: { result: 'offside', winner: null, point: to, len: dist(state.ball, to) } };
+    } else {
+      pass = { passer: holder, to, receiver: a.to, outcome: resolvePass('away', { ...state.ball, id: holder.id }, to, a.to) };
+    }
+  } else if (a.type === 'dribble') {
+    entry.action = `Dribble ${dist(state.ball, a).toFixed(0)} m`;
+    holder.run = { x: a.x - (state.ball.x - holder.x), y: a.y - (state.ball.y - holder.y), bend: 0 };
+    clampToPitch(holder.run);
+    movers.push(holder);
+    extra.tackler = dribbleTackler(state.ball, a);
+  } else {
+    const shot = evaluateShot(state.ball);
+    entry.action = `Shot from ${shot.d.toFixed(0)} m`;
+    let outcome;
+    if (!shot.best) {
+      const lane = shot.lanes[2];
+      outcome = { result: 'blocked', winner: lane.blocker, point: lane.blockPoint, len: lane.len };
+    } else if (shot.saved) {
+      outcome = { result: 'saved', winner: shot.best.keeper, point: { x: 0.5, y: shot.best.to.y }, len: shot.best.len };
+    } else {
+      const goal = Math.random() < shot.odds;
+      extra.odds = shot.odds;
+      const y = goal ? shot.best.to.y : shot.best.to.y < 34 ? 28.8 : 39.2;
+      outcome = { result: goal ? 'goal' : 'miss', winner: null, point: { x: -1, y }, len: shot.best.len };
+    }
+    pass = { passer: holder, to: outcome.point, receiver: null, outcome };
+  }
+  startAnim(movers, pass, { silent: true, extra });
+}
+
+onPlayFinished = (outcome, extra) => {
+  const m = state.match;
+  if (!m || !extra?.entry) return;
+  const e = extra.entry;
+  let over = null;   // { you: boolean, reason }
+  const name = (p) => `${p.team === 'home' ? 'your' : 'their'} #${p.num}`;
+  if (extra.offside) over = { you: true, reason: `Offside: their #${extra.plan.action.to.num} was beyond your line when the phase started.` };
+  else if (outcome) {
+    const r = outcome.result;
+    if (r === 'intercepted') over = { you: true, reason: `Intercepted by ${name(outcome.winner)}.` };
+    else if (r === 'lost') over = { you: true, reason: `Long ball won by ${name(outcome.winner)} (within 4 m of where it landed).` };
+    else if (r === 'lost-space') over = { you: true, reason: `The pass ran to ${name(outcome.winner)}.` };
+    else if (r === 'blocked') over = { you: true, reason: `Shot blocked by ${name(outcome.winner)}.` };
+    else if (r === 'saved') over = { you: true, reason: 'Your keeper saves it.' };
+    else if (r === 'miss') over = { you: true, reason: `The shot goes wide (${Math.round(extra.odds * 100)}% chance).` };
+    else if (r === 'goal') over = { you: false, reason: `Goal. They scored (${Math.round(extra.odds * 100)}% chance).` };
+    else e.outcome = `Found #${outcome.winner.num}.`;
+  } else if (extra.tackler) {
+    giveBall(extra.tackler);
+    over = { you: true, reason: `Dribble stopped by your #${extra.tackler.num}.` };
+  } else e.outcome = 'Carried it forward.';
+
+  if (!over) {
+    const c = carrier();
+    if (c && c.team === 'away' && reachedTarget(m.win, state.ball)) over = { you: false, reason: `They reached the target: ${WIN_TEXT[m.win]}.` };
+    else if (m.phase >= m.total) over = { you: true, reason: `You held them out for all ${m.total} phases.` };
+  }
+  if (over) e.outcome = over.reason;
+  m.log.push(e);
+  if (over) {
+    m.status = 'over';
+    m.result = over;
+    toast(over.you ? `You win: ${over.reason}` : `They win: ${over.reason}`, over.you ? 'good' : 'bad');
+  } else {
+    m.phase++;
+    beginPhase();
+    toast(`Phase ${m.phase} of ${m.total}: ${e.outcome}`);
+  }
+  renderMatchUI();
+  requestRender();
+};
+
+function exitMatch() {
+  if (anim) return;
+  state.match = null;
+  if (matchBoard) restore(matchBoard);
+  matchBoard = null;
+  renderMatchUI();
+  requestRender();
+}
+
+// --- Match drawing ---------------------------------------------------------
+function drawMatch() {
+  const m = state.match;
+  usePitchSpace();
+  // Target zone.
+  ctx.save();
+  ctx.fillStyle = colors.away; ctx.globalAlpha = 0.1;
+  ctx.strokeStyle = colors.away;
+  ctx.lineWidth = lineWidthM(0.3);
+  ctx.setLineDash([1.2, 0.8]);
+  const zone = m.win === 'half' ? [0, 0, PITCH.L / 2, PITCH.W] : m.win === 'final3' ? [0, 0, 35, PITCH.W]
+    : [0, (PITCH.W - PITCH.boxW) / 2, PITCH.boxD, PITCH.boxW];
+  if (m.win !== 'score') { ctx.fillRect(...zone); ctx.globalAlpha = 0.7; ctx.strokeRect(...zone); }
+  ctx.restore();
+  if (m.status !== 'defending') return;
+  // Movement rings and the ball keep-out.
+  const R = RING[m.difficulty];
+  ctx.save();
+  ctx.lineWidth = lineWidthM(0.14);
+  for (const p of homeSide()) {
+    const s = m.starts.get(p.id);
+    ctx.strokeStyle = 'rgba(191,219,254,0.55)';
+    ctx.fillStyle = 'rgba(191,219,254,0.06)';
+    ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(191,219,254,0.6)';
+    dot(s.x, s.y, 0.3);
+  }
+  ctx.setLineDash([0.4, 0.4]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  circle(state.ball.x, state.ball.y, BALL_KEEPOUT);
+  ctx.restore();
+}
+
+// --- Match panel -----------------------------------------------------------
+let matchPreset = 0, matchDifficulty = 'normal';
+function renderMatchUI() {
+  const m = state.match;
+  $('#lockin').hidden = !(m && m.status !== 'over');
+  $('#lockin').disabled = !(m && m.status === 'defending');
+  $('#play').hidden = !!m;
+  for (const b of document.querySelectorAll('[data-tool]')) b.disabled = !!m && b.dataset.tool !== 'move';
+  if (!m) {
+    const p = PRESETS[matchPreset];
+    setHTML($('#match-ui'), `
+      <p class="muted" style="margin-top:0">They attack, you defend. Move your players inside their rings each phase, then lock in.</p>
+      <div class="row"><select id="match-preset" class="grow">${PRESETS.map((q, i) => `<option value="${i}" ${i === matchPreset ? 'selected' : ''}>${esc(q.name)}</option>`).join('')}</select></div>
+      <p style="margin:4px 0">${esc(p.desc)}</p>
+      <div class="row">Difficulty <span class="seg">${Object.keys(RING).map((d) =>
+        `<button data-diff="${d}" aria-pressed="${d === matchDifficulty}">${d[0].toUpperCase() + d.slice(1)} · ${RING[d]} m</button>`).join('')}</span></div>
+      <div class="row"><button class="btn primary" id="match-start">Start match</button></div>`);
+    return;
+  }
+  const status = { defending: 'Move your players inside their rings, then lock in.', thinking: 'They’re reading your shape…', resolving: 'Playing it out…', over: '' }[m.status];
+  const log = m.log.slice().reverse().map((e) => `<li style="display:block"><b>Phase ${e.phase}</b> · ${esc(e.action)}${e.source === 'heuristic' ? ' <span class="muted">(built-in)</span>' : ''}<br>
+    <i>“${esc(e.thinking)}”</i><br>${esc(e.outcome)}</li>`).join('');
+  setHTML($('#match-ui'), `
+    <div><b>${esc(m.setup.name)}</b> · ${esc(m.difficulty)}</div>
+    <p style="margin:4px 0">They win if they ${esc(WIN_TEXT[m.win])}. ${m.status === 'over' ? '' : `Phase ${m.phase} of ${m.total}.`}</p>
+    ${m.result ? `<p style="margin:6px 0;font-weight:600;color:${m.result.you ? '#16a34a' : '#e11d48'}">${m.result.you ? 'You win.' : 'They win.'} ${esc(m.result.reason)}</p>` : `<p class="muted" style="margin:4px 0">${status}</p>`}
+    <div class="row">
+      ${m.status === 'over' ? '<button class="btn primary" id="match-retry">Try again</button><button class="btn" id="match-debrief">Debrief</button>' : `<button class="btn primary" id="match-lock" ${m.status === 'defending' ? '' : 'disabled'}>Lock in</button>`}
+      <button class="btn" id="match-exit">${m.status === 'over' ? 'Back to board' : 'Quit'}</button>
+    </div>
+    <div id="debrief">${m.debrief ? esc(m.debrief).split(/\n\s*\n/).map((para) => `<p>${para}</p>`).join('') : ''}</div>
+    <ul class="plain">${log}</ul>`);
+}
+
+$('#match-ui').addEventListener('click', (ev) => {
+  const t = ev.target.closest('button');
+  if (!t) return;
+  if (t.dataset.diff) { matchDifficulty = t.dataset.diff; renderMatchUI(); }
+  else if (t.id === 'match-start') { startMatch(PRESETS[matchPreset], matchDifficulty); setPanel(false); renderMatchUI(); }
+  else if (t.id === 'match-lock') lockIn();
+  else if (t.id === 'match-retry') { startMatch(state.match.setup, state.match.difficulty); renderMatchUI(); }
+  else if (t.id === 'match-exit') exitMatch();
+  else if (t.id === 'match-debrief') requestDebrief();
+  requestRender();
+});
+$('#match-ui').addEventListener('change', (ev) => { if (ev.target.id === 'match-preset') { matchPreset = +ev.target.value; renderMatchUI(); } });
+$('#lockin').addEventListener('click', lockIn);
+let requestDebrief = () => {};
+renderMatchUI();
+
+/* ================================================================
    Toolbar, toasts, shortcuts
    ================================================================ */
 function setTool(tool) {
@@ -1912,7 +2378,7 @@ window.addEventListener('keydown', (ev) => {
   else if (k === 'r') setTool('runs');
   else if (k === 'p') setTool('pass');
   else if (k === 'b') backToBase();
-  else if (k === ' ') { ev.preventDefault(); play(); }
+  else if (k === ' ') { ev.preventDefault(); state.match ? lockIn() : play(); }
   else if (k === 'c') state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
   else if (k === 'escape') state.selected = null;
   else if (k === 'delete' || k === 'backspace') {
@@ -2078,6 +2544,7 @@ function requestRender() {
     if (state.layers.shape) drawShape();
     if (state.layers.offside) drawOffside();
     if (state.layers.lanes) { drawLanes(A.selLanes, true); drawLanes(A.lanes, false); }
+    if (state.match) drawMatch();
     drawRuns();
     drawPasses();
     if (DEBUG) drawDebug();

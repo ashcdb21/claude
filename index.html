@@ -10,6 +10,9 @@
       --grass: #2f7a3f;
       --line: rgba(255, 255, 255, 0.9);
       --goal: rgba(255, 255, 255, 0.95);
+      --home: #2563eb;
+      --away: #dc2626;
+      --select: #fbbf24;
     }
     html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; }
     #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
@@ -37,6 +40,75 @@ const PITCH = {
   lineW: 0.12,                      // real line width
 };
 const MARGIN = 4;                   // metres of surround kept visible around the pitch
+
+/* ================================================================
+   Data model
+   Formation slots are [x, y, role, unit, number] for the home side
+   (attacking towards x = 105). Unit is one of G / D / DM / M / AM / A
+   and drives the "lines broken" model later. Away sides use the same
+   tables mirrored through the pitch centre: (x, y) -> (L - x, W - y).
+   ================================================================ */
+const GK = [5, 34, 'GK', 'G', 1];
+const BACK4 = [[26, 7, 'LB', 'D', 3], [23, 24, 'CB', 'D', 4], [23, 44, 'CB', 'D', 5], [26, 61, 'RB', 'D', 2]];
+const BACK3 = [[23, 18, 'CB', 'D', 4], [21, 34, 'CB', 'D', 5], [23, 50, 'CB', 'D', 15]];
+const FORMATIONS = {
+  '4-3-3': [GK, ...BACK4, [33, 34, 'DM', 'DM', 6], [41, 23, 'CM', 'M', 8], [41, 45, 'CM', 'M', 10], [57, 11, 'LW', 'A', 11], [59, 34, 'ST', 'A', 9], [57, 57, 'RW', 'A', 7]],
+  '4-2-3-1': [GK, ...BACK4, [33, 26, 'DM', 'DM', 6], [33, 42, 'DM', 'DM', 8], [50, 6, 'LW', 'AM', 11], [55, 34, 'AM', 'AM', 10], [50, 62, 'RW', 'AM', 7], [63, 34, 'ST', 'A', 9]],
+  '4-4-2': [GK, ...BACK4, [42, 8, 'LM', 'M', 11], [40, 26, 'CM', 'M', 8], [40, 42, 'CM', 'M', 6], [42, 60, 'RM', 'M', 7], [57, 28, 'ST', 'A', 9], [57, 40, 'ST', 'A', 10]],
+  '4-1-4-1': [GK, ...BACK4, [32, 34, 'DM', 'DM', 6], [44, 8, 'LM', 'M', 11], [42, 25, 'CM', 'M', 8], [42, 43, 'CM', 'M', 10], [44, 60, 'RM', 'M', 7], [59, 34, 'ST', 'A', 9]],
+  '3-5-2': [GK, ...BACK3, [42, 6, 'LWB', 'M', 3], [32, 34, 'DM', 'DM', 6], [42, 24, 'CM', 'M', 8], [42, 44, 'CM', 'M', 10], [42, 62, 'RWB', 'M', 2], [57, 28, 'ST', 'A', 9], [57, 40, 'ST', 'A', 11]],
+  '3-4-3': [GK, ...BACK3, [40, 7, 'LWB', 'M', 3], [38, 26, 'CM', 'M', 8], [38, 42, 'CM', 'M', 6], [40, 61, 'RWB', 'M', 2], [56, 13, 'LW', 'A', 11], [59, 34, 'ST', 'A', 9], [56, 55, 'RW', 'A', 7]],
+  '5-3-2': [GK, [30, 6, 'LWB', 'D', 3], [22, 21, 'CB', 'D', 4], [21, 34, 'CB', 'D', 5], [22, 47, 'CB', 'D', 15], [30, 62, 'RWB', 'D', 2], [41, 22, 'CM', 'M', 8], [38, 34, 'CM', 'M', 6], [41, 46, 'CM', 'M', 10], [56, 28, 'ST', 'A', 9], [56, 40, 'ST', 'A', 11]],
+};
+
+const CARRY_R = 2.6;                // the carrier is the nearest player within this of the ball
+const PLAYER_R = 1.2;               // drawn disc radius (m)
+const BALL_R = 0.55;
+
+const state = {
+  players: [],
+  ball: { x: 0, y: 0 },
+  selected: null,                   // player id
+};
+
+// A player: current position, base position, and an optional run
+// ({ x, y, bend }) with a base copy so "back to base" can restore it.
+function makePlayer(team, slot, i) {
+  const [sx, sy, role, unit, num] = slot;
+  const x = team === 'home' ? sx : PITCH.L - sx;
+  const y = team === 'home' ? sy : PITCH.W - sy;
+  return {
+    id: `${team}-${i}`, team, role, unit, num,
+    x, y, base: { x, y },
+    run: null, baseRun: null,
+  };
+}
+
+function setupMatch(homeFormation, awayFormation) {
+  state.players = [
+    ...FORMATIONS[homeFormation].map((s, i) => makePlayer('home', s, i)),
+    ...FORMATIONS[awayFormation].map((s, i) => makePlayer('away', s, i)),
+  ];
+  // Start the ball at the home #6's feet.
+  const six = state.players.find((p) => p.team === 'home' && p.num === 6);
+  state.ball = { x: six.x + 1.6, y: six.y };
+  state.selected = null;
+}
+
+function carrier() {
+  let best = null, bestD = CARRY_R;
+  for (const p of state.players) {
+    const d = Math.hypot(p.x - state.ball.x, p.y - state.ball.y);
+    if (d <= bestD) { best = p; bestD = d; }
+  }
+  return best;
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+function clampToPitch(pt) {
+  pt.x = clamp(pt.x, 0, PITCH.L);
+  pt.y = clamp(pt.y, 0, PITCH.W);
+}
 
 /* ================================================================
    View transform
@@ -187,6 +259,137 @@ function dot(x, y, r) {
 }
 
 /* ================================================================
+   Players and ball
+   Sizes are in metres but floored in pixels so they stay legible and
+   touchable on a phone, where 1 m can be ~5 px.
+   ================================================================ */
+const playerR = () => Math.max(PLAYER_R, 7 / view.s);
+const ballR = () => Math.max(BALL_R, 3.5 / view.s);
+
+function drawPlayers() {
+  const css = getComputedStyle(document.documentElement);
+  const colour = { home: css.getPropertyValue('--home'), away: css.getPropertyValue('--away') };
+  const r = playerR();
+  const holder = carrier();
+  usePitchSpace();
+
+  for (const p of state.players) {
+    ctx.fillStyle = colour[p.team];
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = r * 0.14;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+    if (p === holder) {
+      ctx.save();
+      ctx.lineWidth = r * 0.12;
+      ctx.setLineDash([r * 0.35, r * 0.25]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.55, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    if (p.id === state.selected) {
+      ctx.save();
+      ctx.strokeStyle = css.getPropertyValue('--select');
+      ctx.lineWidth = r * 0.2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.3, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+
+    uprightAt(p.x, p.y, () => {
+      ctx.fillStyle = '#fff';
+      ctx.font = `700 ${r * 1.05}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(p.num), 0, r * 0.06);
+    });
+  }
+
+  // Ball on top of everything.
+  const br = ballR();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = br * 0.25;
+  ctx.beginPath(); ctx.arc(state.ball.x, state.ball.y, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+}
+
+/* ================================================================
+   Move tool
+   Hit-testing is done in metres against a touch-sized radius. The
+   pointer keeps its grab offset so nothing jumps under the finger.
+   Dragging the carrier moves the ball with them, keeping the ball at
+   the same offset from their feet.
+   ================================================================ */
+let drag = null;   // { kind: 'player' | 'ball', target, dx, dy, carried: {dx, dy} | null }
+
+function pointerPitch(ev) {
+  const r = canvas.getBoundingClientRect();
+  return toPitch(ev.clientX - r.left, ev.clientY - r.top);
+}
+
+// Nearest draggable thing to the pointer within a finger-sized radius.
+// The ball is tested alongside players so it can be grabbed off a carrier's feet.
+function hitTest(pt) {
+  const reach = Math.max(playerR() * 1.3, 22 / view.s);
+  let best = null, bestD = reach;
+  for (const p of state.players) {
+    const d = Math.hypot(pt.x - p.x, pt.y - p.y);
+    if (d < bestD) { best = { kind: 'player', target: p }; bestD = d; }
+  }
+  // The ball is small and usually sits at a carrier's feet, so it wins
+  // ties within half a player radius; a press on the carrier's centre
+  // still grabs the carrier.
+  const dBall = Math.hypot(pt.x - state.ball.x, pt.y - state.ball.y) - playerR() * 0.5;
+  if (dBall < bestD) best = { kind: 'ball', target: state.ball };
+  return best;
+}
+
+canvas.addEventListener('pointerdown', (ev) => {
+  const pt = pointerPitch(ev);
+  const hit = hitTest(pt);
+  if (!hit) {
+    state.selected = null;
+    requestRender();
+    return;
+  }
+  canvas.setPointerCapture(ev.pointerId);
+  const t = hit.target;
+  drag = { ...hit, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null };
+  if (hit.kind === 'player') {
+    state.selected = t.id;
+    if (carrier() === t) drag.carried = { dx: state.ball.x - t.x, dy: state.ball.y - t.y };
+  }
+  canvas.style.cursor = 'grabbing';
+  requestRender();
+});
+
+canvas.addEventListener('pointermove', (ev) => {
+  const pt = pointerPitch(ev);
+  if (DEBUG) debugPointer = toScreen(pt.x, pt.y);
+  if (!drag || ev.pointerId !== drag.pointerId) {
+    if (ev.pointerType === 'mouse') canvas.style.cursor = hitTest(pt) ? 'grab' : 'default';
+    if (DEBUG) requestRender();
+    return;
+  }
+  const t = drag.target;
+  t.x = pt.x + drag.dx;
+  t.y = pt.y + drag.dy;
+  clampToPitch(t);
+  if (drag.carried) {
+    state.ball.x = t.x + drag.carried.dx;
+    state.ball.y = t.y + drag.carried.dy;
+    clampToPitch(state.ball);
+  }
+  requestRender();
+});
+
+function endDrag(ev) {
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  drag = null;
+  canvas.style.cursor = ev.pointerType === 'mouse' && hitTest(pointerPitch(ev)) ? 'grab' : 'default';
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+/* ================================================================
    Debug overlay (?debug): a known-coordinate marker, attack arrow,
    upright text and the pointer position in metres, to sanity-check
    the transform and its inverse.
@@ -226,14 +429,6 @@ function drawDebug() {
   }
 }
 
-if (DEBUG) {
-  canvas.addEventListener('pointermove', (ev) => {
-    const r = canvas.getBoundingClientRect();
-    debugPointer = { x: ev.clientX - r.left, y: ev.clientY - r.top };
-    requestRender();
-  });
-}
-
 /* ================================================================
    Render loop (on demand) and resize
    ================================================================ */
@@ -245,8 +440,11 @@ function requestRender() {
     renderQueued = false;
     drawPitch();
     if (DEBUG) drawDebug();
+    drawPlayers();
   });
 }
+
+setupMatch('4-3-3', '4-4-2');
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
 // A devicePixelRatio change (moving between screens) doesn't always resize the element,

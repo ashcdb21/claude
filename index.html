@@ -1557,6 +1557,90 @@ function syncControls() {
 }
 
 /* ================================================================
+   AI adapter
+   Every model call goes through askClaude(). Inside a host that provides
+   window.claude.complete it uses that; otherwise it streams from the
+   bundled server's /api/claude proxy, which holds the API key. Failures
+   carry `unavailable` when there is simply no route to a model, so
+   callers can fall back quietly instead of showing an error.
+   ================================================================ */
+class AIError extends Error {
+  constructor(message, unavailable = false) { super(message); this.unavailable = unavailable; }
+}
+
+async function askClaude(prompt, { json = false, onText, signal, system, maxTokens } = {}) {
+  let text = '';
+  if (window.claude?.complete) {
+    text = await window.claude.complete(system ? `${system}\n\n${prompt}` : prompt);
+    onText?.(text, text);
+  } else {
+    if (location.protocol === 'file:') throw new AIError('AI features need the bundled server: run `node server.js` and open http://localhost:3000.', true);
+    let res;
+    try {
+      res = await fetch('/api/claude', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, system, maxTokens }),
+        signal,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      throw new AIError('Could not reach the Tactics Lab server. Is `node server.js` running?', true);
+    }
+    if (!res.ok) {
+      let msg = `Server error ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      // 404/405: a plain static host with no proxy. 503: the server has no key.
+      throw new AIError(res.status === 404 || res.status === 405 ? 'This host has no /api/claude proxy: run `node server.js` to enable AI features.' : msg,
+        [404, 405, 503].includes(res.status));
+    }
+    text = await readSSE(res, onText);
+  }
+  return json ? parseModelJSON(text) : text;
+}
+
+// Accumulate text deltas from an Anthropic Messages SSE stream.
+async function readSSE(res, onText) {
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buf = '', text = '', stop = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf('\n\n')) >= 0) {
+      const event = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      const data = event.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+      if (!data) continue;
+      let msg;
+      try { msg = JSON.parse(data); } catch { continue; }
+      if (msg.type === 'content_block_delta' && msg.delta?.type === 'text_delta') {
+        text += msg.delta.text;
+        onText?.(msg.delta.text, text);
+      } else if (msg.type === 'message_delta' && msg.delta?.stop_reason) {
+        stop = msg.delta.stop_reason;
+      } else if (msg.type === 'error') {
+        throw new AIError(`Model error: ${msg.error?.message || 'unknown'}`);
+      }
+    }
+  }
+  if (stop === 'refusal') throw new AIError('The model declined this request.');
+  return text;
+}
+
+// Models sometimes wrap JSON in prose or code fences; take the outermost
+// object or array and parse that.
+function parseModelJSON(text) {
+  const s = text.replace(/```(?:json)?/gi, '');
+  const i = s.search(/[[{]/);
+  const close = s[i] === '[' ? ']' : '}';
+  const j = s.lastIndexOf(close);
+  if (i < 0 || j <= i) throw new AIError('The model did not return JSON.');
+  try { return JSON.parse(s.slice(i, j + 1)); } catch { throw new AIError('The model returned malformed JSON.'); }
+}
+
+/* ================================================================
    Toolbar, toasts, shortcuts
    ================================================================ */
 function setTool(tool) {

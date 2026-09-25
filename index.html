@@ -5,11 +5,257 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Tactics Lab</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0b1410; }
+    :root {
+      --surround: #0b1410;
+      --grass: #2f7a3f;
+      --line: rgba(255, 255, 255, 0.9);
+      --goal: rgba(255, 255, 255, 0.95);
+    }
+    html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; }
     #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
   </style>
 </head>
 <body>
   <canvas id="pitch"></canvas>
+<script>
+'use strict';
+
+/* ================================================================
+   Pitch geometry (metres)
+   x = 0 is our goal line, x = 105 the opposition's.
+   y = 0 is the touchline on our left as we attack towards x = 105.
+   ================================================================ */
+const PITCH = {
+  L: 105, W: 68,
+  goalY0: 30.34, goalY1: 37.66,     // 7.32 m goal mouth centred on y = 34
+  goalDepth: 2,                     // drawn behind the line, outside the field
+  boxD: 16.5, boxW: 40.32,
+  sixD: 5.5, sixW: 18.32,
+  spotX: 11,
+  circleR: 9.15,
+  cornerR: 1,
+  lineW: 0.12,                      // real line width
+};
+const MARGIN = 4;                   // metres of surround kept visible around the pitch
+
+/* ================================================================
+   View transform
+   Every draw call works in pitch metres. `view` holds the affine map
+   pitch -> CSS pixels; the canvas transform is that map times dpr.
+
+   Landscape: screenX = ox + x*s,        screenY = oy + y*s
+              (we attack left -> right, our left touchline at the top)
+   Portrait:  screenX = ox + y*s,        screenY = oy + (L - x)*s
+              (we attack up the screen, our left touchline on the left)
+
+   Written as canvas setTransform(a, b, c, d, e, f):
+     screenX = a*x + c*y + e,  screenY = b*x + d*y + f
+   ================================================================ */
+const canvas = document.getElementById('pitch');
+const ctx = canvas.getContext('2d');
+const view = { s: 1, a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, portrait: false, dpr: 1, cssW: 0, cssH: 0 };
+
+function layout() {
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  view.cssW = cssW; view.cssH = cssH; view.dpr = dpr;
+  canvas.width = Math.max(1, Math.round(cssW * dpr));
+  canvas.height = Math.max(1, Math.round(cssH * dpr));
+
+  view.portrait = cssH > cssW * 1.08;
+  // Board extent in metres along screen axes, including the margin.
+  const bw = (view.portrait ? PITCH.W : PITCH.L) + 2 * MARGIN;
+  const bh = (view.portrait ? PITCH.L : PITCH.W) + 2 * MARGIN;
+  const s = Math.min(cssW / bw, cssH / bh);   // uniform scale: never stretched
+  view.s = s;
+  // Centre the pitch rectangle (without margin) in the viewport.
+  const ox = (cssW - (bw - 2 * MARGIN) * s) / 2;
+  const oy = (cssH - (bh - 2 * MARGIN) * s) / 2;
+  if (view.portrait) {
+    Object.assign(view, { a: 0, b: -s, c: s, d: 0, e: ox, f: oy + PITCH.L * s });
+  } else {
+    Object.assign(view, { a: s, b: 0, c: 0, d: s, e: ox, f: oy });
+  }
+}
+
+// Switch the context into pitch-metre space.
+function usePitchSpace() {
+  const { a, b, c, d, e, f, dpr } = view;
+  ctx.setTransform(a * dpr, b * dpr, c * dpr, d * dpr, e * dpr, f * dpr);
+}
+
+// Pitch metres -> CSS pixels.
+function toScreen(x, y) {
+  return { x: view.a * x + view.c * y + view.e, y: view.b * x + view.d * y + view.f };
+}
+
+// CSS pixels -> pitch metres (inverse of the 2x2 map plus translation).
+function toPitch(px, py) {
+  const { a, b, c, d, e, f } = view;
+  const det = a * d - b * c;
+  const u = px - e, v = py - f;
+  return { x: (d * u - c * v) / det, y: (a * v - b * u) / det };
+}
+
+// Run `fn` in a frame anchored at pitch point (x, y) whose axes read
+// upright on screen. In portrait the pitch is rotated -90°, so rotating
+// the local frame +90° cancels it. Units stay in metres.
+function uprightAt(x, y, fn) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (view.portrait) ctx.rotate(Math.PI / 2);
+  fn();
+  ctx.restore();
+}
+
+// Lines at real width, but never thinner than ~1.2 device-independent pixels.
+function lineWidthM(metres) {
+  return Math.max(metres, 1.2 / view.s);
+}
+
+/* ================================================================
+   Pitch markings (all at real dimensions)
+   ================================================================ */
+function drawPitch() {
+  const { L, W } = PITCH;
+  const css = getComputedStyle(document.documentElement);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = css.getPropertyValue('--surround');
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  usePitchSpace();
+  ctx.fillStyle = css.getPropertyValue('--grass');
+  ctx.fillRect(-MARGIN, -MARGIN, L + 2 * MARGIN, W + 2 * MARGIN);
+
+  ctx.strokeStyle = css.getPropertyValue('--line');
+  ctx.fillStyle = css.getPropertyValue('--line');
+  ctx.lineWidth = lineWidthM(PITCH.lineW);
+  ctx.lineJoin = 'miter';
+
+  // Outline and halfway line.
+  ctx.strokeRect(0, 0, L, W);
+  line(L / 2, 0, L / 2, W);
+
+  // Centre circle and spot.
+  circle(L / 2, W / 2, PITCH.circleR);
+  dot(L / 2, W / 2, 0.25);
+
+  // Both ends: `dir` = +1 at our goal (x = 0), -1 at theirs (x = L).
+  for (const [gx, dir] of [[0, 1], [L, -1]]) {
+    const boxY0 = (W - PITCH.boxW) / 2, sixY0 = (W - PITCH.sixW) / 2;
+    ctx.strokeRect(Math.min(gx, gx + dir * PITCH.boxD), boxY0, PITCH.boxD, PITCH.boxW);
+    ctx.strokeRect(Math.min(gx, gx + dir * PITCH.sixD), sixY0, PITCH.sixD, PITCH.sixW);
+
+    const spotX = gx + dir * PITCH.spotX;
+    dot(spotX, W / 2, 0.22);
+
+    // Penalty arc: the part of the 9.15 m circle round the spot that lies
+    // beyond the box edge. The edge is (boxD - spotX) = 5.5 m from the spot,
+    // so the arc spans ±acos(5.5 / 9.15) about the direction into the field.
+    const half = Math.acos((PITCH.boxD - PITCH.spotX) / PITCH.circleR);
+    const mid = dir > 0 ? 0 : Math.PI;
+    ctx.beginPath();
+    ctx.arc(spotX, W / 2, PITCH.circleR, mid - half, mid + half);
+    ctx.stroke();
+
+    // Goal frame behind the line.
+    ctx.save();
+    ctx.strokeStyle = css.getPropertyValue('--goal');
+    ctx.lineWidth = lineWidthM(0.12) * 1.5;
+    ctx.strokeRect(Math.min(gx, gx - dir * PITCH.goalDepth), PITCH.goalY0, PITCH.goalDepth, PITCH.goalY1 - PITCH.goalY0);
+    ctx.restore();
+  }
+
+  // Corner arcs, each a quarter circle opening into the field.
+  const corners = [[0, 0, 0], [L, 0, Math.PI / 2], [L, W, Math.PI], [0, W, -Math.PI / 2]];
+  for (const [cx, cy, start] of corners) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, PITCH.cornerR, start, start + Math.PI / 2);
+    ctx.stroke();
+  }
+}
+
+function line(x0, y0, x1, y1) {
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+}
+function circle(x, y, r) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+}
+function dot(x, y, r) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+/* ================================================================
+   Debug overlay (?debug): a known-coordinate marker, attack arrow,
+   upright text and the pointer position in metres, to sanity-check
+   the transform and its inverse.
+   ================================================================ */
+const DEBUG = new URLSearchParams(location.search).has('debug');
+let debugPointer = null;
+
+function drawDebug() {
+  usePitchSpace();
+  // Marker on the far box edge's corner: (105 - 16.5, 13.84).
+  const mx = PITCH.L - PITCH.boxD, my = (PITCH.W - PITCH.boxW) / 2;
+  ctx.fillStyle = '#ffcc00';
+  dot(mx, my, 0.8);
+  uprightAt(mx, my, () => {
+    ctx.font = '600 2.2px system-ui, sans-serif';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`(${mx}, ${my})`, 1, -1);
+  });
+
+  // Attack direction arrow along the halfway line area.
+  ctx.strokeStyle = '#ffcc00';
+  ctx.lineWidth = 0.5;
+  line(40, 4, 65, 4);
+  ctx.beginPath(); ctx.moveTo(65, 4); ctx.lineTo(62, 2.5); ctx.lineTo(62, 5.5); ctx.closePath(); ctx.fill();
+  uprightAt(52.5, 7.5, () => {
+    ctx.font = '600 2px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('WE ATTACK', 0, 0);
+  });
+
+  if (debugPointer) {
+    const p = toPitch(debugPointer.x, debugPointer.y);
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`x ${p.x.toFixed(2)}  y ${p.y.toFixed(2)}  s ${view.s.toFixed(2)}px/m  ${view.portrait ? 'portrait' : 'landscape'}`, 10, 20);
+  }
+}
+
+if (DEBUG) {
+  canvas.addEventListener('pointermove', (ev) => {
+    const r = canvas.getBoundingClientRect();
+    debugPointer = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    requestRender();
+  });
+}
+
+/* ================================================================
+   Render loop (on demand) and resize
+   ================================================================ */
+let renderQueued = false;
+function requestRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    drawPitch();
+    if (DEBUG) drawDebug();
+  });
+}
+
+new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
+// A devicePixelRatio change (moving between screens) doesn't always resize the element,
+// so watch the current ratio and re-arm the query each time it changes.
+function watchDpr() {
+  matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+    .addEventListener('change', () => { layout(); requestRender(); watchDpr(); }, { once: true });
+}
+watchDpr();
+</script>
 </body>
 </html>

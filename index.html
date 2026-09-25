@@ -1813,13 +1813,15 @@ function loadScenario(s) {
   state.basePass = state.pendingPass ? { ...state.pendingPass } : null;
 }
 
-function scenarioPrompt(description) {
-  return `You are a football (soccer) coach designing drills on a tactics board. The user describes a situation; design 2 to 4 distinct scenarios for it. Each scenario is one phase of play lasting about 2 seconds.
-
-Coordinates are metres on a 105 × 68 pitch. x = 0 is the HOME goal line and x = 105 the AWAY goal line; y = 0 is the touchline on the home team's left as they attack towards x = 105. "We" / "us" are the HOME team (blue). The away team (red) attacks towards x = 0. Goal mouths span y = 30.34 to 37.66; penalty areas are 16.5 m deep.
+const COORDS_TEXT = () => `Coordinates are metres on a 105 × 68 pitch. x = 0 is the HOME goal line and x = 105 the AWAY goal line; y = 0 is the touchline on the home team's left as they attack towards x = 105. The HOME team is blue; the AWAY team is red and attacks towards x = 0. Goal mouths span y = 30.34 to 37.66; penalty areas are 16.5 m deep and 40.32 m wide (y = 13.84 to 54.16).
 
 Formations available (use these names exactly): ${Object.keys(FORMATIONS).join(', ')}.
-Shirt numbers by formation (in slot order): ${Object.entries(FORMATIONS).map(([f, s]) => `${f}: ${s.map((q) => `${q[4]} ${q[2]}`).join(', ')}`).join(' | ')}.
+Shirt numbers by formation (in slot order): ${Object.entries(FORMATIONS).map(([f, s]) => `${f}: ${s.map((q) => `${q[4]} ${q[2]}`).join(', ')}`).join(' | ')}.`;
+
+function scenarioPrompt(description) {
+  return `You are a football (soccer) coach designing drills on a tactics board. The user describes a situation; design 2 to 4 distinct scenarios for it. Each scenario is one phase of play lasting about 2 seconds. "We" / "us" are the HOME team.
+
+${COORDS_TEXT()}
 
 How the board resolves a pass (runs finish first, then the ball is judged against where everyone ends up):
 - A ground pass (35 m or shorter) is intercepted by any defender whose projection falls on the ball's straight path and who is within 1.0 + 0.045 × pass length metres of it.
@@ -2093,7 +2095,7 @@ function dribbleTackler(from, to) {
   for (const h of homeSide()) {
     const t = clamp((h.x - from.x) * ux + (h.y - from.y) * uy, 0, len);
     const d = Math.hypot(h.x - (from.x + ux * t), h.y - (from.y + uy * t));
-    if (d < DRIBBLE_TACKLE && t < bt) { best = h; bt = t; }
+    if (d < DRIBBLE_TACKLE - 1e-6 && t < bt) { best = h; bt = t; }   // strictly within: a defender held at the 1.6 m keep-out can still be dribbled away from
   }
   return best;
 }
@@ -2129,6 +2131,7 @@ let matchBoard = null;   // the board to restore when the game ends
 
 function startMatch(setup, difficulty) {
   if (anim) return;
+  if (!state.match) aiOff = false;
   if (!state.match) matchBoard = snapshot();
   state.match = null;
   const scenario = validateScenario({ ...setup, pass: null });
@@ -2234,6 +2237,7 @@ onPlayFinished = (outcome, extra) => {
     else if (r === 'miss') over = { you: true, reason: `The shot goes wide (${Math.round(extra.odds * 100)}% chance).` };
     else if (r === 'goal') over = { you: false, reason: `Goal. They scored (${Math.round(extra.odds * 100)}% chance).` };
     else e.outcome = `Found #${outcome.winner.num}.`;
+    if (e.source === 'model' && extra.plan.action.type === 'pass' && outcome.result !== 'complete') e.note = 'The model expected this pass to be on; the engine disagreed.';
   } else if (extra.tackler) {
     giveBall(extra.tackler);
     over = { you: true, reason: `Dribble stopped by your #${extra.tackler.num}.` };
@@ -2302,9 +2306,13 @@ function drawMatch() {
 }
 
 // --- Match panel -----------------------------------------------------------
-let matchPreset = 0, matchDifficulty = 'normal';
+let matchPreset = 0, matchDifficulty = 'normal', matchBusy = false, matchNote = '';
 function renderMatchUI() {
   const m = state.match;
+  const keepText = $('#match-text')?.value;
+  try { renderMatchPanel(m); } finally { if (keepText != null && $('#match-text')) $('#match-text').value = keepText; }
+}
+function renderMatchPanel(m) {
   $('#lockin').hidden = !(m && m.status !== 'over');
   $('#lockin').disabled = !(m && m.status === 'defending');
   $('#play').hidden = !!m;
@@ -2317,12 +2325,15 @@ function renderMatchUI() {
       <p style="margin:4px 0">${esc(p.desc)}</p>
       <div class="row">Difficulty <span class="seg">${Object.keys(RING).map((d) =>
         `<button data-diff="${d}" aria-pressed="${d === matchDifficulty}">${d[0].toUpperCase() + d.slice(1)} · ${RING[d]} m</button>`).join('')}</span></div>
-      <div class="row"><button class="btn primary" id="match-start">Start match</button></div>`);
+      <div class="row"><button class="btn primary" id="match-start" ${matchBusy ? 'disabled' : ''}>${matchBusy ? 'Setting up…' : 'Start match'}</button></div>
+      <textarea id="match-text" rows="2" style="width:100%" placeholder="Or describe a situation to defend (needs the model)"></textarea>
+      <div class="row"><button class="btn" id="match-custom" ${matchBusy ? 'disabled' : ''}>Start from description</button></div>
+      ${matchNote ? `<p class="muted">${esc(matchNote)}</p>` : ''}`);
     return;
   }
   const status = { defending: 'Move your players inside their rings, then lock in.', thinking: 'They’re reading your shape…', resolving: 'Playing it out…', over: '' }[m.status];
   const log = m.log.slice().reverse().map((e) => `<li style="display:block"><b>Phase ${e.phase}</b> · ${esc(e.action)}${e.source === 'heuristic' ? ' <span class="muted">(built-in)</span>' : ''}<br>
-    <i>“${esc(e.thinking)}”</i><br>${esc(e.outcome)}</li>`).join('');
+    <i>“${esc(e.thinking)}”</i><br>${esc(e.outcome)}${e.note ? `<br><span class="muted">${esc(e.note)}</span>` : ''}</li>`).join('');
   setHTML($('#match-ui'), `
     <div><b>${esc(m.setup.name)}</b> · ${esc(m.difficulty)}</div>
     <p style="margin:4px 0">They win if they ${esc(WIN_TEXT[m.win])}. ${m.status === 'over' ? '' : `Phase ${m.phase} of ${m.total}.`}</p>
@@ -2339,7 +2350,11 @@ $('#match-ui').addEventListener('click', (ev) => {
   const t = ev.target.closest('button');
   if (!t) return;
   if (t.dataset.diff) { matchDifficulty = t.dataset.diff; renderMatchUI(); }
-  else if (t.id === 'match-start') { startMatch(PRESETS[matchPreset], matchDifficulty); setPanel(false); renderMatchUI(); }
+  else if (t.id === 'match-start') { setPanel(false); startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]); }
+  else if (t.id === 'match-custom') {
+    const d = $('#match-text').value.trim();
+    if (d) { setPanel(false); startFromModel(d, null); } else { matchNote = 'Describe a situation first.'; renderMatchUI(); }
+  }
   else if (t.id === 'match-lock') lockIn();
   else if (t.id === 'match-retry') { startMatch(state.match.setup, state.match.difficulty); renderMatchUI(); }
   else if (t.id === 'match-exit') exitMatch();
@@ -2350,6 +2365,167 @@ $('#match-ui').addEventListener('change', (ev) => { if (ev.target.id === 'match-
 $('#lockin').addEventListener('click', lockIn);
 let requestDebrief = () => {};
 renderMatchUI();
+
+/* ================================================================
+   Match play: model opponent and debrief
+   The model sees exactly what the engine will use, with the resolution
+   rules written from the same constants, so its stated reasoning and
+   the outcome agree. Anything unusable falls back to the heuristic.
+   ================================================================ */
+let aiOff = false;           // set when no route to a model exists; retried each new match
+const f1 = (v) => v.toFixed(1);
+const rulesText = () => `Resolution rules (the board's engine applies exactly these):
+- Your runs happen first; the defenders do NOT move after locking in. Each run is at most ${MATCH_RUN_CAP} m. "bend" in [-0.7, 0.7] curves a run but only its end point matters for the outcome.
+- The ball carrier does not make a run; they pass, dribble or shoot.
+- PASS to a teammate at their run end (or current position if they don't run). A pass of ${LOFT_OVER} m or less is intercepted if any defender whose projection falls on the straight line from the ball to that end point is within 1.0 + 0.045 × pass length metres of the line. A pass longer than ${LOFT_OVER} m is lofted: nobody can intercept it in flight, but it is lost if any defender is within ${LOFT_LOSE_R} m of the landing point.
+- OFFSIDE: a pass to a player who was beyond the offside line (x smaller than the line, since you attack towards x = 0) at the START of the phase is offside and you lose the ball.
+- DRIBBLE up to ${DRIBBLE_CAP} m from the ball: lost if any defender is within ${DRIBBLE_TACKLE} m of the straight path.
+- SHOOT: five lanes run from the ball to x = 0 at y = ${GOAL_LANES.join(', ')}. A lane is blocked by an outfield defender within ${SHOT_BLOCK} m of it (projection on the lane). On the clearest open lane the keeper saves if he is within 1.2 + 0.07 × shot length metres of it. Otherwise it scores with probability clamp(1.1 − distance to goal centre / 25, 0.1, 0.9). If every lane is blocked the shot is blocked.
+- You lose on any turnover, block, save, miss or offside, or if the last phase ends without reaching the target. You win by scoring or ending a phase with the ball in the target area.`;
+
+function matchPrompt() {
+  const m = state.match, holder = carrier(), ball = state.ball;
+  const home = homeSide(), away = awaySide();
+  const line = (p) => `#${p.num} ${p.role} (${f1(p.x)}, ${f1(p.y)})`;
+  const options = away.filter((r) => r !== holder).map((r) => {
+    const o = resolvePass('away', { ...ball, id: holder.id }, r, r, (q) => ({ x: q.x, y: q.y }));
+    const off = m.offsideAtStart.has(r.id);
+    const status = off ? 'OFFSIDE (was beyond the line at phase start)' : o.result === 'complete' ? 'open right now' : o.result === 'intercepted' ? `cut out by your opponent's #${o.winner.num}` : `lofted, lost to #${o.winner.num}`;
+    return `  to #${r.num}: ${f1(dist(ball, r))} m, breaks ${linesBroken(ball, r, 'away')} line(s), ${status}`;
+  }).join('\n');
+  const nearest = away.map((p) => {
+    const d = home.reduce((b, h) => (dist(h, p) < dist(b, p) ? h : b));
+    return `  #${p.num}: nearest defender #${d.num} at ${f1(dist(d, p))} m`;
+  }).join('\n');
+  const shot = evaluateShot(ball);
+  const shotText = shot.best
+    ? `${shot.lanes.filter((l) => !l.blocker).length} of 5 lanes open; on the clearest lane the keeper ${shot.saved ? 'WOULD save' : `would not reach it; scoring chance ${Math.round(shot.odds * 100)}%`}; distance ${f1(shot.d)} m`
+    : 'all five lanes blocked';
+  const log = m.log.length ? m.log.map((e) => `  Phase ${e.phase}: ${e.action}. ${e.outcome}`).join('\n') : '  (first phase)';
+  return `You are the attacking side in a turn-based football tactics game. You control the AWAY team (red), attacking towards x = 0. The user controls the HOME team (blue) and defends.
+
+${COORDS_TEXT()}
+
+${rulesText()}
+
+Situation: ${m.setup.name}. You win if you ${WIN_TEXT[m.win]}. This is phase ${m.phase} of ${m.total}.
+
+Ball at (${f1(ball.x)}, ${f1(ball.y)}), carried by your #${holder.num}.
+Your players (away): ${away.map(line).join('; ')}.
+Defenders (home): ${home.map(line).join('; ')}.
+Offside line at the start of this phase: x = ${f1(m.offsideLineAtStart)}. Offside right now: ${[...m.offsideAtStart].map((id) => '#' + state.players.find((p) => p.id === id).num).join(', ') || 'nobody'}.
+Passes from the carrier with everyone where they stand now (runs change this):
+${options}
+Nearest defender to each of your players:
+${nearest}
+Shot from here right now: ${shotText}.
+Previous phases:
+${log}
+
+Plan this phase. Find the weakness in the user's defensive shape and exploit it. Check your chosen action against the rules above using the run end points you choose.
+Reply with JSON only:
+{"thinking": "one or two sentences to the user, in the second person, naming the gap in their shape (e.g. 'Your #8 has stepped out, so the lane to our #10 is open.')", "runs": [{"num": 9, "x": 0, "y": 0, "bend": 0}], "action": {"type": "pass", "to": 9}}
+action is one of {"type": "pass", "to": <shirt number>}, {"type": "dribble", "x": <end x>, "y": <end y>} or {"type": "shoot"}. runs may be empty.`;
+}
+
+async function withTimeout(ms, fn) {
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms);
+  try { return await fn(c.signal); } finally { clearTimeout(t); }
+}
+
+getOpponentPlan = async () => {
+  const m = state.match;
+  if (aiOff) return null;
+  try {
+    const raw = await withTimeout(90000, (signal) => askClaude(matchPrompt(), { json: true, signal, maxTokens: 4000 }));
+    const plan = sanitizePlan(raw);
+    if (plan) m.source = 'model';
+    return plan;
+  } catch (err) {
+    if (err.unavailable) aiOff = true;
+    toast(err.unavailable ? 'No model available: using the built-in opponent' : 'The model’s move was unusable: using the built-in opponent');
+    return null;
+  }
+};
+
+// Ask the model for a match setup; the preset's built-in one is the fallback.
+function setupPrompt(description) {
+  return `You set up a turn-based football defending exercise. The AWAY team attacks towards x = 0; the user's HOME team defends.
+
+${COORDS_TEXT()}
+
+Create a starting position for this situation: ${description}
+Give all 22 positions, with the ball at the feet of an away player, no home player within 2 m of the ball, and players at least 2 m apart. Choose a win condition for the attackers: "half" (get the ball into the home half, x < 52.5), "final3" (x < 35), "box" (into the home penalty area) or "score", and a number of phases from 3 to 5 that makes it a fair challenge.
+Reply with JSON only:
+{"name": "short title", "desc": "one sentence for the defender", "win": "box", "phases": 4, "homeFormation": "4-4-2", "awayFormation": "4-3-3", "ball": {"x": 0, "y": 0}, "home": [{"num": 1, "x": 0, "y": 0}], "away": [{"num": 1, "x": 0, "y": 0}]}
+Each of "home" and "away" must list all 11 players.`;
+}
+
+function validateSetup(raw, fallback) {
+  const s = validateScenario({ ...raw, pass: null });
+  if (!s) return null;
+  const win = ['half', 'final3', 'box', 'score'].includes(raw.win) ? raw.win : fallback?.win || 'box';
+  const phases = clamp(Math.round(num(raw.phases)) || fallback?.phases || 4, 3, 5);
+  const P2 = (q) => P(q.num, q.x, q.y);
+  return {
+    name: str(raw.name, 60) || fallback?.name || 'Custom', desc: str(raw.desc, 200) || fallback?.desc || '', win, phases,
+    homeFormation: s.homeFormation, awayFormation: s.awayFormation, ball: s.ball, home: s.home.map(P2), away: s.away.map(P2),
+  };
+}
+
+async function startFromModel(description, fallback) {
+  if (anim || matchBusy) return;
+  aiOff = false;
+  matchBusy = true;
+  renderMatchUI();
+  let setup = null;
+  try {
+    const raw = await withTimeout(90000, (signal) => askClaude(setupPrompt(description), { json: true, signal, maxTokens: 8000 }));
+    setup = validateSetup(raw, fallback);
+    if (!setup) throw new AIError('The model’s setup was unusable.');
+  } catch (err) {
+    if (err.unavailable) aiOff = true;
+    if (!fallback) { matchBusy = false; matchNote = err.message; renderMatchUI(); return; }
+    toast(`${err.unavailable ? 'No model available' : 'Model setup unusable'}: using the built-in setup`);
+  }
+  matchBusy = false;
+  matchNote = '';
+  startMatch(setup || fallback, matchDifficulty);
+  // Nobody may start inside the ball's keep-out.
+  for (const p of homeSide()) if (dist(p, state.ball) < BALL_KEEPOUT) { state.match.starts.set(p.id, { x: p.x, y: p.y }); constrainDefender(p); }
+  beginPhase();
+  renderMatchUI();
+  requestRender();
+}
+
+requestDebrief = async () => {
+  const m = state.match;
+  if (!m || m.debriefing) return;
+  m.debriefing = true;
+  m.debrief = 'Writing the debrief…';
+  renderMatchUI();
+  const prompt = `You are a football coach giving a short debrief to a player who has just defended in a turn-based tactics exercise (they controlled the HOME team; the AWAY team attacked towards x = 0).
+
+${COORDS_TEXT()}
+
+Exercise: ${m.setup.name}. ${m.setup.desc} The attackers had ${m.total} phases to ${WIN_TEXT[m.win]}.
+Result: ${m.result.you ? 'the defender won' : 'the attackers won'}: ${m.result.reason}
+Phase log:
+${m.log.map((e) => `Phase ${e.phase}: attackers' read: "${e.thinking}" Action: ${e.action}. Outcome: ${e.outcome}`).join('\n')}
+Final positions: defenders ${homeSide().map((p) => `#${p.num} (${f1(p.x)}, ${f1(p.y)})`).join(', ')}.
+
+Write exactly three short paragraphs of plain text, no markdown, no headings, no lists: what happened, what the defender did well or badly with specific shirt numbers, and one concrete thing to try next time.`;
+  try {
+    const text = await withTimeout(90000, (signal) => askClaude(prompt, { signal, maxTokens: 2000, onText: (_, all) => { m.debrief = all; renderMatchUI(); } }));
+    // Plain text was asked for; strip any markdown that slipped through, keeping shirt numbers like #6.
+    m.debrief = text.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/(\*\*|__|`)/g, '').replace(/^\s*[-*>]\s+/gm, '').trim();
+  } catch (err) {
+    m.debrief = err.unavailable ? `The debrief needs the model. ${err.message}` : `Couldn’t write a debrief: ${err.message}`;
+  }
+  m.debriefing = false;
+  renderMatchUI();
+};
 
 /* ================================================================
    Toolbar, toasts, shortcuts

@@ -19,7 +19,7 @@ Each phase builds against a section of `SPEC.md`.
 | 10 | `askClaude()` adapter + `/api/claude` proxy, temporary ping (removed after) | `server.js`, `index.html` | Done |
 | 11 | Scenario builder with hand-authored fallback, validated/clamped JSON | `index.html` | Done |
 | 12 | Match play with heuristic opponent only | `index.html` | Done |
-| 13 | Match play AI opponent + debrief, heuristic fallback | `index.html` | |
+| 13 | Match play AI opponent + debrief, heuristic fallback | `index.html` | Done |
 | 14 | Final QA against "Acceptance checks" at desktop and 390 px | — | |
 
 Rule for every phase: only touch the listed files, and don't implement

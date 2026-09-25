@@ -157,6 +157,8 @@ function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const pathname = req.url.split('?')[0];
+  // Lets the page find out once whether AI is configured, instead of probing with real requests.
+  if (pathname === '/api/status') return sendJSON(res, 200, { ai: !!process.env.ANTHROPIC_API_KEY });
   if (pathname === '/api/claude') {
     if (req.method !== 'POST') {
       res.writeHead(405, { Allow: 'POST' });

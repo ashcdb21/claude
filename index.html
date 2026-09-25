@@ -1603,6 +1603,14 @@ class AIError extends Error {
   constructor(message, unavailable = false) { super(message); this.unavailable = unavailable; }
 }
 
+// Whether the bundled server has a key, asked once per page load. null means
+// no answer (e.g. a plain static host), in which case calls are attempted anyway.
+let proxyStatus;
+function proxyReady() {
+  proxyStatus ||= fetch('/api/status').then((r) => (r.ok ? r.json() : null)).then((j) => (j ? !!j.ai : null)).catch(() => null);
+  return proxyStatus;
+}
+
 async function askClaude(prompt, { json = false, onText, signal, system, maxTokens } = {}) {
   let text = '';
   if (window.claude?.complete) {
@@ -1610,6 +1618,7 @@ async function askClaude(prompt, { json = false, onText, signal, system, maxToke
     onText?.(text, text);
   } else {
     if (location.protocol === 'file:') throw new AIError('AI features need the bundled server: run `node server.js` and open http://localhost:3000.', true);
+    if ((await proxyReady()) === false) throw new AIError('ANTHROPIC_API_KEY is not set on the server. Add it to .env or the environment and restart.', true);
     let res;
     try {
       res = await fetch('/api/claude', {
@@ -2148,6 +2157,7 @@ function startMatch(setup, difficulty) {
   setTool('move');
   state.selected = null;
   toast(`Phase 1 of ${setup.phases}: set your shape, then lock in`);
+  renderMatchUI();
 }
 
 function beginPhase() {
@@ -2702,7 +2712,10 @@ $('#panel-open').addEventListener('click', () => setPanel(!$('#panel').classList
 $('#panel-close').addEventListener('click', () => setPanel(false));
 const HINT_KEY = 'tacticsLab.hintDismissed';
 $('#hint').hidden = !!store.get(HINT_KEY, false);
-$('#hint-close').addEventListener('click', () => { $('#hint').hidden = true; store.set(HINT_KEY, true); });
+const dismissHint = () => { if (!$('#hint').hidden) { $('#hint').hidden = true; store.set(HINT_KEY, true); } };
+$('#hint-close').addEventListener('click', dismissHint);
+// Once someone has touched the board they've found the controls; don't keep covering the toasts.
+canvas.addEventListener('pointerdown', dismissHint);
 
 /* ================================================================
    Render loop (on demand) and resize

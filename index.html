@@ -32,6 +32,8 @@
       padding: 8px 14px; border-radius: 8px; background: rgba(0,0,0,0.75); color: #fff; font: 600 14px system-ui, sans-serif;
       opacity: 0; transition: opacity .2s; pointer-events: none; }
     #toast.show { opacity: 1; }
+    #toast.good { background: rgba(21,128,61,0.9); }
+    #toast.bad { background: rgba(185,28,28,0.9); }
   </style>
 </head>
 <body>
@@ -40,6 +42,7 @@
   <div id="toolbar" role="toolbar" aria-label="Tools">
     <button data-tool="move" aria-pressed="true" title="Move (V)">Move</button>
     <button data-tool="runs" aria-pressed="false" title="Runs (R)">Runs</button>
+    <button data-tool="pass" aria-pressed="false" title="Pass (P)">Pass</button>
     <button id="play" title="Play (Space)">▶ Play</button>
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
@@ -96,6 +99,7 @@ const state = {
   possession: 'home',               // last team to have a carrier
   layers: { lanes: true, lines: true, offside: true, shape: true, roles: false },
   tool: 'move',                     // 'move' | 'runs' | 'pass'
+  pendingPass: null,                // { passerId, receiverId, x, y } queued behind runs
   match: null,                      // match-play state when a game is running
 };
 
@@ -741,7 +745,11 @@ function drawPlayers() {
   }
 
   // Ball on top of everything.
-  const br = ballR();
+  const br = ballR() * (1 + 0.7 * (state.ballLift || 0));
+  if (state.ballLift) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    dot(state.ball.x, state.ball.y + br * 1.2 * state.ballLift, ballR());
+  }
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#111';
   ctx.lineWidth = br * 0.25;
@@ -843,7 +851,7 @@ function hitTest(pt, tool = state.tool) {
   for (const p of state.players) {
     if (!visible(p)) continue;
     consider('player', p, dist(pt, p));
-    if (p.run && tool !== 'pass') {
+    if (p.run && tool !== 'pass' && !state.match) {
       const g = runGeom(p, p.run);
       consider('bend', p, dist(pt, g.H) - bias);
       consider('runEnd', p, dist(pt, g.E) - bias);
@@ -864,7 +872,17 @@ canvas.addEventListener('pointerdown', (ev) => {
   }
   const t = hit.target;
   drag = { kind: hit.kind, target: t, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null, start: pt };
-  if (hit.kind === 'player') {
+  if (state.tool === 'pass' && hit.kind === 'ball') {
+    const passer = carrier();
+    if (!passer) { drag = null; toast('Nobody has the ball: move a player onto it first'); return; }
+    drag.kind = 'pass';
+    drag.passer = passer;
+  } else if (state.tool === 'pass') {
+    drag = null;
+    if (hit.kind === 'player') state.selected = t.id;
+    requestRender();
+    return;
+  } else if (hit.kind === 'player') {
     state.selected = t.id;
     if (state.tool === 'runs') drag.kind = 'newRun';
     else if (carrier() === t) drag.carried = { dx: state.ball.x - t.x, dy: state.ball.y - t.y };
@@ -915,6 +933,9 @@ canvas.addEventListener('pointermove', (ev) => {
     case 'bend':
       t.run.bend = bendFromHandle(runGeom(t, t.run), pt);
       break;
+    case 'pass':
+      drag.to = dist(pt, drag.start) > 2 ? passTarget(drag.passer, pt) : null;
+      break;
   }
   requestRender();
 });
@@ -925,7 +946,9 @@ function endDrag(ev) {
   if ((drag.kind === 'newRun' || drag.kind === 'runEnd') && drag.target.run && dist(drag.target, drag.target.run) < 2) {
     drag.target.run = null;
   }
+  const done = drag;
   drag = null;
+  if (done.kind === 'pass' && done.to) commitPass(done.passer, done.to);
   canvas.style.cursor = ev.pointerType === 'mouse' && hitTest(pointerPitch(ev)) ? 'grab' : 'default';
   requestRender();
 }
@@ -933,27 +956,112 @@ canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
 /* ================================================================
+   Pass resolution
+   Positions are where everyone will be when the ball arrives (after
+   their planned runs), so a pass is judged against the finished picture.
+   • Ground pass (≤ 35 m): intercepted by the first defender, along the
+     path, whose projection lands on the path (0 ≤ t ≤ length) and who
+     sits within 1.0 + 0.045 × length of it. The path runs from the
+     release point to the receiver's end position.
+   • Lofted pass (> 35 m): clears everyone in transit, but is lost if any
+     defender ends within 4 m of the landing point.
+   • Into space: the ball goes to whoever ends nearest the landing point,
+     from either side.
+   ================================================================ */
+const LOFT_OVER = 35, LOFT_LOSE_R = 4;
+const finalPos = (p) => (p.run ? { x: p.run.x, y: p.run.y } : { x: p.x, y: p.y });
+const interceptRadius = (len) => 1.0 + 0.045 * len;
+
+function resolvePass(team, from, to, receiver, at = finalPos) {
+  const len = dist(from, to);
+  const opp = opponentsOf(team);
+  const lofted = len > LOFT_OVER;
+  if (lofted) {
+    for (const o of opp) {
+      if (dist(at(o), to) < LOFT_LOSE_R) return { result: 'lost', winner: o, point: to, lofted, len };
+    }
+  } else if (len > 1e-6) {
+    const ux = (to.x - from.x) / len, uy = (to.y - from.y) / len, r = interceptRadius(len);
+    let first = null, firstT = Infinity;
+    for (const o of opp) {
+      const q = at(o);
+      const t = (q.x - from.x) * ux + (q.y - from.y) * uy;
+      if (t < 0 || t > len) continue;
+      if (Math.abs((q.x - from.x) * uy - (q.y - from.y) * ux) < r && t < firstT) { first = o; firstT = t; }
+    }
+    if (first) return { result: 'intercepted', winner: first, point: { x: from.x + ux * firstT, y: from.y + uy * firstT }, lofted, len };
+  }
+  if (receiver) return { result: 'complete', winner: receiver, point: to, lofted, len };
+  let near = null, nearD = Infinity;
+  for (const p of state.players) {
+    if (!visible(p) || p.id === from.id) continue;
+    const d = dist(at(p), to);
+    if (d < nearD) { near = p; nearD = d; }
+  }
+  return { result: near && near.team === team ? 'complete' : 'lost-space', winner: near, point: to, lofted, len, space: true };
+}
+
+function passToast(o) {
+  const who = (p) => `${p.team === 'home' ? '' : 'away '}#${p.num}`;
+  if (o.result === 'complete') toast(o.space ? `Into space: ${who(o.winner)} gets there first` : `${o.lofted ? 'Lofted pass finds' : 'Pass complete to'} ${who(o.winner)}`, 'good');
+  else if (o.result === 'intercepted') toast(`Intercepted by ${who(o.winner)}`, 'bad');
+  else if (o.result === 'lost') toast(`Lofted ball lost: ${who(o.winner)} was within 4 m of the landing spot`, 'bad');
+  else toast(o.winner ? `Into space: ${who(o.winner)} gets there first` : 'Pass runs out of play', 'bad');
+}
+
+// Put the ball at a player's feet, just ahead of them.
+function giveBall(p) {
+  state.ball = { x: p.x + 0.9 * attackDir(p.team), y: p.y };
+  clampToPitch(state.ball);
+  state.possession = p.team;
+}
+
+/* ================================================================
    Play
    All runs animate together over 2.2 s with an ease-in-out, each along
    its own Bézier. A carrier with a run dribbles: the ball keeps its
    offset from their feet. Analysis recomputes every frame.
    ================================================================ */
-const PLAY_MS = 2200;
+const PLAY_MS = 2200, RELEASE_AT = 0.3;
 let anim = null;
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
+// Plan and start an animation of every planned run plus an optional pass.
+// With runs, the pass is released 30% of the way in and lands as the
+// runs finish; a pass on its own plays straight away at ball speed.
 function play() {
-  if (anim || state.match) return;
+  if (anim) return;
   const movers = state.players.filter((p) => p.run && visible(p));
-  if (!movers.length) { toast('Nothing to play yet: draw a run first'); return; }
+  const pp = state.pendingPass;
+  let pass = null;
+  if (pp) {
+    state.pendingPass = null;
+    const passer = state.players.find((p) => p.id === pp.passerId);
+    if (passer && carrier() === passer) pass = { passer, to: { x: pp.x, y: pp.y }, receiver: state.players.find((p) => p.id === pp.receiverId) || null };
+    else toast('Pass cancelled: the passer no longer has the ball', 'bad');
+  }
+  if (!movers.length && !pass) { if (!pp) toast('Nothing to play yet: draw a run or a pass'); requestRender(); return; }
   const holder = carrier();
   anim = {
     t0: performance.now(),
     dur: PLAY_MS,
     starts: new Map(movers.map((p) => [p, { x: p.x, y: p.y }])),
     geoms: new Map(movers.map((p) => [p, runGeom(p, p.run)])),
-    dribble: holder && holder.run ? { p: holder, dx: state.ball.x - holder.x, dy: state.ball.y - holder.y } : null,
+    dribble: holder ? { p: holder, dx: state.ball.x - holder.x, dy: state.ball.y - holder.y } : null,
+    pass: null,
   };
+  if (pass) {
+    const releaseT = movers.length ? RELEASE_AT : 0;
+    const g = anim.geoms.get(pass.passer);
+    const at = g ? bezier(g, easeInOut(releaseT)) : pass.passer;
+    const from = { x: at.x + anim.dribble.dx, y: at.y + anim.dribble.dy, id: pass.passer.id };
+    const outcome = resolvePass(pass.passer.team, from, pass.to, pass.receiver);
+    const flightLen = dist(from, outcome.point);
+    if (!movers.length) anim.dur = clamp(dist(from, pass.to) * 28, 450, 1400) + (outcome.lofted ? 300 : 0);
+    // An interception meets the ball part-way along the full flight.
+    const arriveT = releaseT + (1 - releaseT) * (outcome.len > 0 ? flightLen / outcome.len : 1);
+    anim.pass = { from, outcome, releaseT, arriveT };
+  }
   requestAnimationFrame(tick);
 }
 
@@ -962,7 +1070,21 @@ function tick(now) {
   const raw = clamp((now - anim.t0) / anim.dur, 0, 1);
   const e = easeInOut(raw);
   for (const [p, g] of anim.geoms) Object.assign(p, bezier(g, e));
-  if (anim.dribble) {
+  const pass = anim.pass;
+  state.ballLift = 0;
+  if (pass && raw >= pass.releaseT) {
+    const f = clamp((raw - pass.releaseT) / Math.max(pass.arriveT - pass.releaseT, 1e-6), 0, 1);
+    const k = 1 - (1 - f) * (1 - f);            // ball decelerates slightly as it arrives
+    const to = pass.outcome.point;
+    if (f < 1) {
+      state.ball.x = pass.from.x + (to.x - pass.from.x) * k;
+      state.ball.y = pass.from.y + (to.y - pass.from.y) * k;
+      if (pass.outcome.lofted) state.ballLift = Math.sin(Math.PI * f);
+    } else if (pass.outcome.winner) {
+      // Arrived: the ball stays at the winner's feet while runs finish.
+      state.ball.x = pass.outcome.winner.x; state.ball.y = pass.outcome.winner.y;
+    }
+  } else if (anim.dribble) {
     state.ball.x = anim.dribble.p.x + anim.dribble.dx;
     state.ball.y = anim.dribble.p.y + anim.dribble.dy;
     clampToPitch(state.ball);
@@ -974,7 +1096,64 @@ function tick(now) {
 
 function finishPlay() {
   for (const p of anim.geoms.keys()) { clampToPitch(p); p.run = null; }
+  const pass = anim.pass;
   anim = null;
+  state.ballLift = 0;
+  if (pass) {
+    if (pass.outcome.winner) giveBall(pass.outcome.winner);
+    else { state.ball = { ...pass.outcome.point }; clampToPitch(state.ball); }
+    passToast(pass.outcome);
+  }
+  onPlayFinished(pass && pass.outcome);
+}
+let onPlayFinished = () => {};
+
+// Pass tool: drop target is a teammate's planned run end, a teammate
+// (who receives wherever their run takes them), or empty space.
+function passTarget(passer, pt) {
+  const snap = Math.max(playerR() * 1.6, 24 / view.s);
+  let best = null, bestD = snap;
+  for (const q of teammatesOf(passer)) {
+    if (!visible(q)) continue;
+    if (q.run && dist(pt, q.run) < bestD) { best = { receiver: q, x: q.run.x, y: q.run.y }; bestD = dist(pt, q.run); }
+    if (dist(pt, q) < bestD) { const f = finalPos(q); best = { receiver: q, x: f.x, y: f.y }; bestD = dist(pt, q); }
+  }
+  if (best) return best;
+  const p = { x: pt.x, y: pt.y };
+  clampToPitch(p);
+  return { receiver: null, x: p.x, y: p.y };
+}
+
+function commitPass(passer, target) {
+  state.pendingPass = { passerId: passer.id, receiverId: target.receiver?.id ?? null, x: target.x, y: target.y };
+  if (state.players.some((p) => p.run && visible(p))) toast('Pass queued: it plays with the runs');
+  else play();
+}
+
+function drawPassArrow(from, to, dashed) {
+  usePitchSpace();
+  ctx.strokeStyle = '#fff';
+  ctx.fillStyle = '#fff';
+  ctx.lineWidth = lineWidthM(0.28);
+  ctx.setLineDash(dashed ? [0.5, 0.6] : []);
+  line(from.x, from.y, to.x, to.y);
+  ctx.setLineDash([]);
+  const len = dist(from, to) || 1, ux = (to.x - from.x) / len, uy = (to.y - from.y) / len, h = playerR() * 0.9;
+  ctx.beginPath();
+  ctx.moveTo(to.x, to.y);
+  ctx.lineTo(to.x - ux * h - uy * h * 0.5, to.y - uy * h + ux * h * 0.5);
+  ctx.lineTo(to.x - ux * h + uy * h * 0.5, to.y - uy * h - ux * h * 0.5);
+  ctx.closePath(); ctx.fill();
+  if (len > LOFT_OVER) {
+    ctx.globalAlpha = 0.5;
+    circle(to.x, to.y, LOFT_LOSE_R);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPasses() {
+  if (state.pendingPass && !anim) drawPassArrow(state.ball, state.pendingPass, true);
+  if (drag && drag.kind === 'pass' && drag.to) drawPassArrow(state.ball, drag.to, false);
 }
 
 /* ================================================================
@@ -1002,12 +1181,14 @@ window.addEventListener('keydown', (ev) => {
   const k = ev.key.toLowerCase();
   if (k === 'v') setTool('move');
   else if (k === 'r') setTool('runs');
+  else if (k === 'p') setTool('pass');
   else if (k === ' ') { ev.preventDefault(); play(); }
   else if (k === 'c') state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
   else if (k === 'escape') state.selected = null;
   else if (k === 'delete' || k === 'backspace') {
     const p = state.players.find((q) => q.id === state.selected);
     if (p && p.run && !anim) p.run = null;
+    else state.pendingPass = null;
   } else return;
   requestRender();
 });
@@ -1093,6 +1274,7 @@ function requestRender() {
     if (state.layers.offside) drawOffside();
     if (state.layers.lanes) { drawLanes(A.selLanes, true); drawLanes(A.lanes, false); }
     drawRuns();
+    drawPasses();
     if (DEBUG) drawDebug();
     drawPlayers();
     updateReadout();

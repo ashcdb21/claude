@@ -12,7 +12,7 @@ Each phase builds against a section of `SPEC.md`.
 | 3 | Voronoi zones (exact clipping) + pitch control (grid + logistic), minimal readout | `index.html` | Done |
 | 4 | Passing lanes, "+n" lines broken, offside line, team shape | `index.html` | Done |
 | 5 | Runs tool, bend handle (both directions), Play animation | `index.html` | Done |
-| 6 | Pass tool + resolution (interception, 35 m lofted rule, into space, toasts, queue behind runs at ~30%) | `index.html` | |
+| 6 | Pass tool + resolution (interception, 35 m lofted rule, into space, toasts, queue behind runs at ~30%) | `index.html` | Done |
 | 7 | Formations (7 per side), possession/visibility, base state, localStorage persistence | `index.html` | |
 | 8 | Side panel / mobile sheet, layer toggles, saved tactics, shortcuts | `index.html` | |
 | 9 | Visual polish, dark-mode tokens, offscreen background cache | `index.html` | |

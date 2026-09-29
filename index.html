@@ -79,10 +79,40 @@
     #toast.show { opacity: 1; }
     #toast.good { background: rgba(21,128,61,0.92); }
     #toast.bad { background: rgba(185,28,28,0.92); }
-    #hint { position: absolute; left: 12px; top: calc(env(safe-area-inset-top) + 12px); max-width: 280px; padding: 10px 12px;
-      background: rgba(15,23,42,0.85); color: #fff; border-radius: 10px; font-size: 13px; }
-    #hint[hidden] { display: none; }
-    #hint button { float: right; margin: -4px -4px 0 8px; background: transparent; border: 0; color: #fff; font-size: 16px; }
+    #hud { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 10px); transform: translateX(-50%); z-index: 2;
+      padding: 8px 14px; border-radius: 12px; background: rgba(8,12,18,0.82); color: #fff; text-align: center;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); max-width: calc(100% - 16px); }
+    .hud-top { display: flex; gap: 10px; justify-content: center; font: 600 13px var(--font-body); color: #cbd5e1; flex-wrap: wrap; }
+    .hud-top b { font: 700 16px var(--font-cond); letter-spacing: .06em; color: #fff; text-transform: uppercase; }
+    .hud-line { font: 700 19px var(--font-cond); letter-spacing: .03em; margin-top: 2px; }
+    .hud-line .bad { color: #fb7185; } .hud-line .good { color: #4ade80; }
+    .hud-tip { font-size: 12px; color: #94a3b8; }
+    .pulse { animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
+    #stage.in-match #toast { top: auto; bottom: calc(env(safe-area-inset-bottom) + 68px); }
+    @media (max-width: 600px) {
+      #hud { padding: 6px 12px; } .hud-top { font-size: 12px; } .hud-top b { font-size: 14px; } .hud-line { font-size: 17px; }
+      .hud-tip { display: none; }
+    }
+    #result, #welcome { position: absolute; inset: 0; display: grid; place-items: center; z-index: 4; padding: 16px; }
+    #result[hidden], #welcome[hidden] { display: none; }
+    #welcome { background: rgba(4,8,6,0.55); }
+    #result .card, #welcome .card { width: min(440px, 100%); max-height: 100%; overflow-y: auto; padding: 22px; border-radius: 18px;
+      background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 1px solid var(--border);
+      -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); animation: pop .35s cubic-bezier(.2,1.4,.4,1); }
+    #result .card.won { border-top: 5px solid #22c55e; } #result .card.lost { border-top: 5px solid var(--away); }
+    .card .big { font: 700 40px/1 var(--font-cond); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 8px; }
+    .card .big span { color: var(--accent); }
+    .card .rec { color: var(--muted); font-weight: 600; }
+    .card .row { justify-content: flex-start; }
+    .card ul { padding-left: 18px; color: var(--muted); font-size: 13px; }
+    .btn.huge { display: block; width: 100%; margin: 8px 0; padding: 12px; font: 700 20px var(--font-cond); letter-spacing: .04em; text-transform: uppercase; }
+    @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+    #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 3; }
+    #flash.goal { background: radial-gradient(circle, rgba(225,29,72,0.0) 30%, rgba(225,29,72,0.55)); animation: flash .9s ease-out; }
+    #flash.win { background: radial-gradient(circle, rgba(34,197,94,0.0) 30%, rgba(34,197,94,0.45)); animation: flash .9s ease-out; }
+    @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { #result .card, #welcome .card, .pulse, #flash { animation: none !important; } }
 
     /* Panel: a bottom sheet by default, a right-hand column on wide landscape screens. */
     #panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 78dvh; overflow-y: auto; overscroll-behavior: contain;
@@ -137,13 +167,26 @@
       <span class="sep"></span>
       <button id="play" title="Play (Space)">▶<span class="wide"> Play</span></button>
       <button id="lockin" hidden>Lock in</button>
+      <button id="view-btn" title="Change view (L)">👁<span class="wide"> Passing</span></button>
+      <button id="match-quick" title="Defend a match">🛡<span class="wide"> Match</span></button>
       <button id="panel-open" aria-controls="panel" aria-expanded="false" aria-label="Panel">☰<span class="wide"> Panel</span></button>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
-    <div id="hint" hidden>
-      <button id="hint-close" aria-label="Dismiss">✕</button>
-      Drag players and the ball. <b>Runs</b> (R): drag from a player, then bend with the middle handle.
-      <b>Pass</b> (P): drag from the ball. <b>Space</b> plays it.
+    <div id="hud" hidden aria-live="polite"></div>
+    <div id="result" hidden></div>
+    <div id="flash"></div>
+    <div id="welcome" hidden>
+      <div class="card">
+        <div class="big">Tactics <span>Lab</span></div>
+        <p>A real-size pitch for trying ideas, and a defending game against an opponent that reads your shape.</p>
+        <button class="btn primary huge" id="w-match">🛡 Defend a match</button>
+        <button class="btn huge" id="w-board">✏️ Explore the board</button>
+        <ul>
+          <li><b>Drag</b> players and the ball. <b>Runs</b> (R): drag from a player, bend with the middle handle.</li>
+          <li><b>Pass</b> (P): drag from the ball to a teammate. <b>Space</b> plays it.</li>
+          <li><b>👁 View</b> (L) switches what the board shows: passing, space, zones, shape.</li>
+        </ul>
+      </div>
     </div>
   </main>
   <aside id="panel" aria-label="Tactics panel">
@@ -164,6 +207,9 @@
     <section><h2>Selected player</h2><div id="selected"></div></section>
     <section>
       <h2>Layers</h2>
+      <div class="row">View
+        <span class="seg" id="views"></span>
+      </div>
       <div class="row">Coverage
         <span class="seg" id="coverage">
           <button data-cov="control">Control</button><button data-cov="zones">Zones</button><button data-cov="off">Off</button>
@@ -205,7 +251,7 @@
       <ul class="plain">
         <li><kbd>V</kbd> Move <kbd>R</kbd> Runs <kbd>P</kbd> Pass</li>
         <li><kbd>Space</kbd> Play <kbd>B</kbd> Back to base</li>
-        <li><kbd>C</kbd> Cycle coverage <kbd>Esc</kbd> Deselect</li>
+        <li><kbd>L</kbd> Change view <kbd>C</kbd> Cycle coverage <kbd>Esc</kbd> Deselect</li>
         <li><kbd>Delete</kbd> Remove selected run or queued pass</li>
       </ul>
     </section>
@@ -260,9 +306,10 @@ const state = {
   players: [],
   ball: { x: 0, y: 0 },
   selected: null,                   // player id
-  coverage: 'control',              // 'control' | 'zones' | 'off'
+  coverage: 'off',                  // 'control' | 'zones' | 'off'
   possession: 'home',               // last team to have a carrier
-  layers: { lanes: true, lines: true, offside: true, shape: true, roles: false },
+  layers: { lanes: true, lines: true, offside: true, shape: false, roles: false },
+  view: 'passing',                  // a named preset of coverage + layers, or 'custom'
   tool: 'move',                     // 'move' | 'runs' | 'pass'
   pendingPass: null,                // { passerId, receiverId, x, y } queued behind runs
   match: null,                      // match-play state when a game is running
@@ -344,6 +391,33 @@ function makeBase() {
 }
 
 /* ================================================================
+   Views: named sets of layers so only one question is on screen at a
+   time ("who can I pass to?", "who owns the space?"...). Changing a
+   single layer by hand switches the view to "Custom".
+   ================================================================ */
+const VIEWS = {
+  clean: { label: 'Clean', coverage: 'off', layers: { lanes: false, lines: false, offside: false, shape: false } },
+  passing: { label: 'Passing', coverage: 'off', layers: { lanes: true, lines: true, offside: true, shape: false } },
+  space: { label: 'Space', coverage: 'control', layers: { lanes: false, lines: false, offside: false, shape: false } },
+  zones: { label: 'Zones', coverage: 'zones', layers: { lanes: false, lines: false, offside: false, shape: false } },
+  shape: { label: 'Shape', coverage: 'off', layers: { lanes: false, lines: false, offside: true, shape: true } },
+};
+const VIEW_ORDER = Object.keys(VIEWS);
+function setView(name) {
+  const v = VIEWS[name];
+  if (!v) return;
+  state.view = name;
+  state.coverage = v.coverage;
+  Object.assign(state.layers, v.layers);
+  requestRender();
+}
+function cycleView() {
+  const i = VIEW_ORDER.indexOf(state.view);
+  setView(VIEW_ORDER[(i + 1) % VIEW_ORDER.length]);
+  toast(`View: ${VIEWS[state.view].label}`);
+}
+
+/* ================================================================
    Persistence
    Storage can be missing, full or blocked (private windows), so every
    access is wrapped and the board always has an in-memory fallback.
@@ -363,7 +437,7 @@ const cleanRun = (r) => (r && isPt(r) ? { ...cleanPt(r), bend: clamp(Number(r.be
 
 function snapshot() {
   return structuredClone({
-    formations: state.formations, showAway: state.showAway, coverage: state.coverage, layers: state.layers,
+    formations: state.formations, showAway: state.showAway, coverage: state.coverage, layers: state.layers, view: state.view,
     possession: state.possession, ball: state.ball, baseBall: state.baseBall,
     players: state.players.map((p) => ({ x: p.x, y: p.y, base: p.base, run: p.run, baseRun: p.baseRun })),
   });
@@ -387,6 +461,7 @@ function restore(s) {
   if (['control', 'zones', 'off'].includes(s.coverage)) state.coverage = s.coverage;
   if (s.layers && typeof s.layers === 'object') for (const k in state.layers) if (typeof s.layers[k] === 'boolean') state.layers[k] = s.layers[k];
   state.showAway = s.showAway !== false;
+  state.view = VIEWS[s.view] || s.view === 'custom' ? s.view : 'custom';
   if (s.possession === 'home' || s.possession === 'away') state.possession = s.possession;
   return true;
 }
@@ -674,6 +749,7 @@ function analyse() {
     offsideX: offX,
     offside: offsidePlayers(team, offX, holder),
     shape: { home: teamShape('home'), away: teamShape('away') },
+    threats: state.match && state.match.status === 'defending' ? computeThreats() : null,
   };
   return A;
 }
@@ -941,8 +1017,8 @@ function drawControl() {
   const d = tintImage.data, [hr, hg, hb] = colors.homeRGB, [ar, ag, ab] = colors.awayRGB;
   for (let k = 0; k < NX * NY; k++) {
     const p = controlP[k], home = p >= 0.5;
-    // Alpha ∝ |2p - 1|^0.9, capped at 0.35 so the grass reads through.
-    const a = 0.35 * Math.pow(Math.abs(2 * p - 1), 0.9);
+    // Alpha ∝ |2p - 1|^0.9, capped at 0.3 so the grass reads through.
+    const a = 0.3 * Math.pow(Math.abs(2 * p - 1), 0.9);
     d[k * 4] = home ? hr : ar; d[k * 4 + 1] = home ? hg : ag; d[k * 4 + 2] = home ? hb : ab;
     d[k * 4 + 3] = a * 255;
   }
@@ -955,8 +1031,8 @@ function drawControl() {
   ctx.drawImage(tintCanvas, -GRID / 2, -GRID / 2, NX * GRID, NY * GRID);
   ctx.restore();
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-  ctx.lineWidth = lineWidthM(0.18);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = lineWidthM(0.14);
   ctx.lineCap = 'round';
   ctx.beginPath();
   for (const [x0, y0, x1, y1] of controlContour()) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
@@ -1009,29 +1085,41 @@ function drawOffside() {
 }
 
 // Open lanes are white and thin out with distance; blocked ones are dashed red.
+// Open lanes are white and thin out with distance; the best line-breaking
+// option is gold. Blocked lanes only show for the player you've selected,
+// so the default picture is "where can the ball go", not every option.
 function drawLanes(lanes, faint) {
   usePitchSpace();
   ctx.lineCap = 'round';
+  const focus = !faint && A.carrier && A.carrier.id === state.selected;
+  const open = lanes.filter((l) => !l.blocker);
+  const best = open.filter((l) => l.breaks).sort((a, b) => b.breaks - a.breaks || b.len - a.len)[0] || null;
   for (const l of lanes) {
     const { from, to } = l;
     if (l.blocker) {
+      if (!focus && !faint) continue;
       ctx.strokeStyle = colors.blocked;
-      ctx.globalAlpha = faint ? 0.5 : 0.85;
-      ctx.lineWidth = lineWidthM(0.2);
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = lineWidthM(0.16);
       ctx.setLineDash([0.9, 0.7]);
+    } else if (l === best && !faint) {
+      ctx.strokeStyle = colors.badge;
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = Math.max(0.55, 2 / view.s);
+      ctx.setLineDash([]);
     } else {
       ctx.strokeStyle = '#fff';
-      ctx.globalAlpha = faint ? 0.45 : 0.85;
-      ctx.lineWidth = Math.max(0.6 - 0.45 * (l.len / LANE_RANGE), 1.2 / view.s);
+      ctx.globalAlpha = faint ? 0.35 : 0.7;
+      ctx.lineWidth = Math.max(0.45 - 0.33 * (l.len / LANE_RANGE), 1.1 / view.s);
       ctx.setLineDash([]);
     }
     line(from.x, from.y, to.x, to.y);
   }
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
-  if (!state.layers.lines) return;
-  for (const l of lanes) {
-    if (l.blocker || !l.breaks) continue;
+  if (!state.layers.lines || faint) return;
+  // Label only the two most line-breaking open passes.
+  for (const l of open.filter((q) => q.breaks).sort((a, b) => b.breaks - a.breaks).slice(0, 2)) {
     badge((l.from.x + l.to.x) / 2, (l.from.y + l.to.y) / 2, `+${l.breaks}`);
   }
 }
@@ -1071,7 +1159,7 @@ function drawPlayers() {
   const holder = carrier();
   usePitchSpace();
 
-  const offside = new Set(state.layers.offside ? A.offside : []);
+  const offside = new Set(state.layers.offside || state.match ? A.offside : []);
   for (const p of state.players) {
     if (!visible(p)) continue;
     if (offside.has(p)) {
@@ -1136,6 +1224,13 @@ function drawPlayers() {
     });
   }
 
+  // Ball trail while a pass is in the air.
+  if (state.trail?.length) {
+    state.trail.forEach((q, i) => {
+      ctx.fillStyle = `rgba(255,255,255,${(0.5 * (i + 1)) / state.trail.length})`;
+      dot(q.x, q.y, ballR() * (0.35 + (0.5 * (i + 1)) / state.trail.length));
+    });
+  }
   // Ball on top of everything.
   const br = ballR() * (1 + 0.7 * (state.ballLift || 0));
   if (state.ballLift) {
@@ -1490,6 +1585,8 @@ function tick(now) {
     if (f < 1) {
       state.ball.x = pass.from.x + (to.x - pass.from.x) * k;
       state.ball.y = pass.from.y + (to.y - pass.from.y) * k;
+      (state.trail ||= []).push({ x: state.ball.x, y: state.ball.y });
+      if (state.trail.length > 16) state.trail.shift();
       if (pass.outcome.lofted) state.ballLift = Math.sin(Math.PI * f);
     } else if (pass.outcome.winner) {
       // Arrived: the ball stays at the winner's feet while runs finish.
@@ -1510,6 +1607,7 @@ function finishPlay() {
   const { pass, silent, extra } = anim;
   anim = null;
   state.ballLift = 0;
+  state.trail = [];
   if (pass) {
     if (pass.outcome.winner) giveBall(pass.outcome.winner);
     else state.ball = { ...pass.outcome.point };
@@ -1945,30 +2043,34 @@ const WIN_TEXT = {
   score: 'score',
 };
 
+const WIN_SHORT = { half: 'reach your half', final3: 'reach your third', box: 'reach your box', score: 'score' };
+
 const PRESETS = [
+  // Easiest first. Balance-tested against a greedy lane-cutting defender:
+  // the first one is lost by standing still and won by cutting lanes.
   {
-    name: 'Break our mid-block', win: 'final3', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
-    desc: 'They build from the back against your 4-4-2 block. Keep them out of your defensive third for four phases.',
-    ball: { x: 78.6, y: 44 },
-    home: [P(1, 6, 34), P(3, 34, 10), P(4, 30, 27), P(5, 30, 41), P(2, 34, 58), P(11, 46, 12), P(8, 44, 28), P(6, 44, 40), P(7, 46, 56), P(9, 58, 30), P(10, 58, 40)],
-    away: [P(1, 100, 34), P(3, 74, 62), P(4, 80, 44), P(5, 82, 24), P(2, 74, 6), P(6, 68, 34), P(8, 60, 46), P(10, 60, 22), P(11, 50, 60), P(9, 46, 34), P(7, 50, 8)],
-  },
-  {
-    name: 'Stop the counter', win: 'box', phases: 3, homeFormation: '4-3-3', awayFormation: '4-4-2',
-    desc: 'You lost it high up the pitch with your full-backs forward. Keep them out of your box for three phases.',
-    ball: { x: 56.6, y: 30 },
-    home: [P(1, 14, 34), P(3, 52, 8), P(4, 40, 26), P(5, 40, 42), P(2, 54, 60), P(6, 56, 37), P(8, 64, 24), P(10, 64, 46), P(11, 74, 12), P(9, 78, 34), P(7, 74, 56)],
-    away: [P(1, 100, 34), P(3, 76, 60), P(4, 80, 42), P(5, 80, 26), P(2, 76, 8), P(11, 60, 58), P(8, 62, 42), P(6, 58, 30), P(7, 60, 10), P(9, 50, 44), P(10, 48, 24)],
-  },
-  {
-    name: 'Overload on our right', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    stars: 1, name: 'Overload on our right', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
     desc: 'Their full-back, #8 and winger gang up on your right side. Stop them getting into the box for four phases.',
     ball: { x: 56.6, y: 62 },
     home: [P(1, 6, 34), P(3, 26, 14), P(4, 24, 28), P(5, 24, 40), P(2, 30, 56), P(11, 40, 16), P(8, 40, 30), P(6, 40, 42), P(7, 44, 58), P(9, 54, 30), P(10, 52, 44)],
     away: [P(1, 98, 34), P(3, 58, 62), P(4, 70, 42), P(5, 72, 24), P(2, 62, 10), P(6, 60, 36), P(8, 50, 50), P(10, 52, 26), P(11, 38, 60), P(9, 36, 34), P(7, 40, 14)],
   },
   {
-    name: 'Edge of the box', win: 'score', phases: 3, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    stars: 2, name: 'Break our mid-block', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'They build from the back against your 4-4-2 block. Keep them out of your box for four phases.',
+    ball: { x: 78.6, y: 44 },
+    home: [P(1, 6, 34), P(3, 34, 10), P(4, 30, 27), P(5, 30, 41), P(2, 34, 58), P(11, 46, 12), P(8, 44, 28), P(6, 44, 40), P(7, 46, 56), P(9, 58, 30), P(10, 58, 40)],
+    away: [P(1, 100, 34), P(3, 74, 62), P(4, 80, 44), P(5, 82, 24), P(2, 74, 6), P(6, 68, 34), P(8, 60, 46), P(10, 60, 22), P(11, 50, 60), P(9, 46, 34), P(7, 50, 8)],
+  },
+  {
+    stars: 3, name: 'Stop the counter', win: 'box', phases: 4, homeFormation: '4-3-3', awayFormation: '4-4-2',
+    desc: 'You lost it high up the pitch with your full-backs forward. Keep them out of your box for four phases.',
+    ball: { x: 56.6, y: 30 },
+    home: [P(1, 14, 34), P(3, 52, 8), P(4, 40, 26), P(5, 40, 42), P(2, 54, 60), P(6, 56, 37), P(8, 64, 24), P(10, 64, 46), P(11, 74, 12), P(9, 78, 34), P(7, 74, 56)],
+    away: [P(1, 100, 34), P(3, 76, 60), P(4, 80, 42), P(5, 80, 26), P(2, 76, 8), P(11, 60, 58), P(8, 62, 42), P(6, 58, 30), P(7, 60, 10), P(9, 50, 44), P(10, 48, 24)],
+  },
+  {
+    stars: 3, name: 'Edge of the box', win: 'score', phases: 3, homeFormation: '4-4-2', awayFormation: '4-3-3',
     desc: 'They have it 28 m out with runners around your box. Don’t concede for three phases.',
     ball: { x: 28.5, y: 36 },
     home: [P(1, 3, 34), P(3, 14, 20), P(4, 13, 30), P(5, 13, 40), P(2, 14, 50), P(11, 22, 16), P(8, 22, 30), P(6, 22, 40), P(7, 24, 54), P(9, 36, 30), P(10, 38, 42)],
@@ -2055,12 +2157,6 @@ function heuristicPlan() {
   }
   const at = (q) => (q.team === 'away' && ends.has(q.id) ? ends.get(q.id) : { x: q.x, y: q.y });
 
-  // Shot?
-  const shot = evaluateShot(ball);
-  const lastChance = m.phase === m.total;
-  if (shot.d < 26 && shot.best && !shot.saved && (shot.odds >= 0.2 || lastChance)) {
-    return { runs, action: { type: 'shoot' }, thinking: `Your block leaves a clear lane at the ${shot.best.to.y < 34 ? 'near' : 'far'} side and your keeper can't cover it, so we shoot.` };
-  }
   // Best uncut pass.
   let pick = null;
   for (const r of away) {
@@ -2069,6 +2165,16 @@ function heuristicPlan() {
     if (o.result !== 'complete') continue;
     const v = (ball.x - to.x) + 2 * linesBroken(ball, to, 'away') + 0.4 * Math.min(space(to), 10) + (reachedTarget(m.win, to) ? 30 : 0);
     if (!pick || v > pick.v) pick = { r, to, v };
+  }
+  // A completed pass into the target wins outright: take it before anything else.
+  if (pick && reachedTarget(m.win, pick.to)) {
+    return { runs, action: { type: 'pass', to: pick.r.num }, thinking: `Nobody is on the line to our #${pick.r.num}, and he ends up inside your ${m.win === 'box' ? 'box' : 'zone'}.` };
+  }
+  // Shot?
+  const shot = evaluateShot(ball);
+  const lastChance = m.phase === m.total;
+  if (shot.d < 26 && shot.best && !shot.saved && (shot.odds >= 0.2 || lastChance)) {
+    return { runs, action: { type: 'shoot' }, thinking: `Your block leaves a clear lane at the ${shot.best.to.y < 34 ? 'near' : 'far'} side and your keeper can't cover it, so we shoot.` };
   }
   if (pick && pick.v > -8) {
     const gap = Math.min(space(pick.to), 20);
@@ -2163,17 +2269,24 @@ function startMatch(setup, difficulty) {
 function beginPhase() {
   const m = state.match;
   m.starts = new Map(homeSide().map((p) => [p.id, { x: p.x, y: p.y }]));
-  // Offside is judged from positions at the start of the phase.
+  m.status = 'defending';
+}
+
+// Offside is judged the moment the attack starts: after you've set your
+// line and before anyone runs, so stepping up can catch attackers out.
+function fixOffside() {
+  const m = state.match;
   const line = offsideLine('away');
   m.offsideLineAtStart = line;
   m.offsideAtStart = new Set(awaySide().filter((p) => p !== carrier() && p.x < line - 1e-9).map((p) => p.id));
-  m.status = 'defending';
 }
 
 async function lockIn() {
   const m = state.match;
   if (!m || m.status !== 'defending' || anim) return;
   m.status = 'thinking';
+  fixOffside();
+  state.selected = null;
   renderMatchUI();
   let plan = null;
   try { plan = await getOpponentPlan(); } catch { plan = null; }
@@ -2260,10 +2373,18 @@ onPlayFinished = (outcome, extra) => {
   }
   if (over) e.outcome = over.reason;
   m.log.push(e);
+  // Effects where the moment happened.
+  const green = '#34d399';
+  if (extra.offside) burst(state.ball.x, state.ball.y, colors.offside);
+  else if (extra.tackler) burst(extra.tackler.x, extra.tackler.y, green);
+  else if (outcome && ['intercepted', 'lost', 'blocked', 'saved'].includes(outcome.result)) burst(outcome.point.x, outcome.point.y, green, true);
+  else if (outcome?.result === 'goal') { burst(0, outcome.point.y, colors.away, true); flash('goal'); }
   if (over) {
     m.status = 'over';
     m.result = over;
-    toast(over.you ? `You win: ${over.reason}` : `They win: ${over.reason}`, over.you ? 'good' : 'bad');
+    recordResult(over.you);
+    if (over.you) { confetti(); flash('win'); }
+    else if (outcome?.result !== 'goal') flash('goal');
   } else {
     m.phase++;
     beginPhase();
@@ -2273,12 +2394,151 @@ onPlayFinished = (outcome, extra) => {
   requestRender();
 };
 
+// Win/loss record and streak, kept per browser.
+const RECORD_KEY = 'tacticsLab.record.v1';
+let record = store.get(RECORD_KEY, null);
+if (!record || !Number.isFinite(record.w)) record = { w: 0, l: 0, streak: 0, best: 0 };
+function recordResult(won) {
+  if (won) { record.w++; record.streak++; record.best = Math.max(record.best, record.streak); }
+  else { record.l++; record.streak = 0; }
+  store.set(RECORD_KEY, record);
+}
+const recordText = () => `${record.w}W – ${record.l}L${record.streak > 1 ? ` · ${record.streak} in a row` : ''}${record.best > 1 ? ` · best ${record.best}` : ''}`;
+
 function exitMatch() {
   if (anim) return;
   state.match = null;
   if (matchBoard) restore(matchBoard);
   matchBoard = null;
   renderMatchUI();
+  requestRender();
+}
+
+// --- Live threats ----------------------------------------------------------
+// While you set your shape, every pass from their carrier is judged by
+// resolvePass() against where everyone stands now, plus a shot check, so
+// you can watch lanes close as you drag. (Their runs can still reopen one.)
+function computeThreats() {
+  const holder = carrier();
+  if (!holder || holder.team !== 'away') return null;
+  const here = (q) => ({ x: q.x, y: q.y });
+  const line = offsideLine('away');
+  const passes = awaySide().filter((r) => r !== holder).map((r) => {
+    const o = resolvePass('away', { ...state.ball, id: holder.id }, r, r, here);
+    const offside = r.x < line - 1e-9;
+    const gain = state.ball.x - r.x, breaks = linesBroken(state.ball, r, 'away');
+    const ok = o.result === 'complete' && !offside;
+    // Only forward passes that gain ground or break a line are threats;
+    // recycling it backwards or square is not.
+    return { r, o, offside, gain, breaks, open: ok && (gain >= 6 || breaks > 0), safe: ok && gain < 6 && !breaks };
+  });
+  const shot = evaluateShot(state.ball, here);
+  const shotOn = !!shot.best && !shot.saved && shot.d < 30;
+  return { passes, shot, shotOn, open: passes.filter((p) => p.open).length, line };
+}
+
+function drawThreats(T) {
+  usePitchSpace();
+  const b = state.ball, r = playerR();
+  ctx.lineCap = 'round';
+  const danger = T.passes.filter((p) => p.open).sort((a, c) => c.gain - a.gain)[0];
+  for (const p of T.passes) {
+    const to = p.r;
+    if (p.safe) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = lineWidthM(0.12);
+      line(b.x, b.y, to.x, to.y);
+    } else if (p.open) {
+      // Glow then core, heavier for the most dangerous pass.
+      const w = p === danger ? 0.9 : 0.55;
+      ctx.strokeStyle = colors.away;
+      ctx.globalAlpha = 0.25; ctx.lineWidth = Math.max(w * 2.4, 6 / view.s); line(b.x, b.y, to.x, to.y);
+      ctx.globalAlpha = 0.95; ctx.lineWidth = Math.max(w, 2 / view.s); line(b.x, b.y, to.x, to.y);
+      ctx.globalAlpha = 1;
+    } else if (p.offside && p.o.result === 'complete') {
+      ctx.strokeStyle = colors.offside; ctx.globalAlpha = 0.6;
+      ctx.lineWidth = lineWidthM(0.14); ctx.setLineDash([0.5, 0.7]);
+      line(b.x, b.y, to.x, to.y); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    } else if (dist(b, to) < 32) {
+      // Cut: a faint stub up to where it dies, marked with a cross.
+      const at = p.o.point;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = lineWidthM(0.12); ctx.setLineDash([0.4, 0.6]);
+      line(b.x, b.y, at.x, at.y); ctx.setLineDash([]);
+      const k = r * 0.45;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = lineWidthM(0.2);
+      line(at.x - k, at.y - k, at.x + k, at.y + k); line(at.x - k, at.y + k, at.x + k, at.y - k);
+    }
+  }
+  if (T.shotOn) {
+    const to = T.shot.best.to;
+    ctx.strokeStyle = colors.away; ctx.globalAlpha = 0.9;
+    ctx.lineWidth = Math.max(0.5, 2 / view.s); ctx.setLineDash([1.2, 0.6]);
+    line(b.x, b.y, to.x, to.y); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    badge((b.x + to.x) / 2, (b.y + to.y) / 2, `Shot ${Math.round(T.shot.odds * 100)}%`);
+  }
+}
+
+function updateHud() {
+  const m = state.match, hud = $('#hud');
+  if (!m || m.status === 'over') { hud.hidden = true; return; }
+  hud.hidden = false;
+  const head = `<div class="hud-top"><b>Phase ${m.phase}/${m.total}</b><span>Don’t let them ${esc(WIN_SHORT[m.win])}</span></div>`;
+  if (m.status !== 'defending') {
+    setHTML(hud, head + `<div class="hud-line pulse">${m.status === 'thinking' ? 'They’re reading your shape…' : 'Playing it out…'}</div>`);
+    return;
+  }
+  const T = A.threats;
+  if (!T) { setHTML(hud, head); return; }
+  const passLine = T.open ? `<span class="bad">${T.open} lane${T.open > 1 ? 's' : ''} open</span>` : '<span class="good">Lanes cut ✓</span>';
+  const shotLine = T.shotOn ? `<span class="bad">Shot ${Math.round(T.shot.odds * 100)}%</span>` : '<span class="good">Shot covered</span>';
+  setHTML(hud, head + `<div class="hud-line">${passLine} · ${shotLine}</div>
+    <div class="hud-tip">Drag players to cut the red lanes. Step your line up to catch runners offside. Then lock in.</div>`);
+}
+
+// --- Effects ---------------------------------------------------------------
+const fx = [];
+function burst(x, y, color, big = false) { fx.push({ kind: 'burst', x, y, color, t0: performance.now(), dur: big ? 900 : 650, big }); requestRender(); }
+function confetti() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const W = canvas.clientWidth, cols = [colors.home, colors.select, '#ffffff', '#34d399', colors.badge];
+  for (let i = 0; i < 140; i++) {
+    fx.push({ kind: 'bit', x: W / 2 + (Math.random() - 0.5) * W * 0.6, y: -10 - Math.random() * 80, vx: (Math.random() - 0.5) * 3,
+      vy: 2 + Math.random() * 3, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.3, c: cols[i % cols.length], t0: performance.now(), dur: 2200 });
+  }
+  requestRender();
+}
+function flash(kind) {
+  const el = $('#flash');
+  el.className = ''; void el.offsetWidth; el.className = kind;
+}
+function drawFx() {
+  const now = performance.now();
+  for (let i = fx.length - 1; i >= 0; i--) if (now - fx[i].t0 > fx[i].dur) fx.splice(i, 1);
+  if (!fx.length) return;
+  for (const f of fx) {
+    const t = (now - f.t0) / f.dur;
+    if (f.kind === 'burst') {
+      usePitchSpace();
+      ctx.strokeStyle = f.color;
+      for (const k of f.big ? [0, 0.18, 0.36] : [0, 0.2]) {
+        const tt = clamp(t - k, 0, 1);
+        if (!tt) continue;
+        ctx.globalAlpha = 1 - tt;
+        ctx.lineWidth = Math.max(0.5 * (1 - tt), 1 / view.s);
+        circle(f.x, f.y, 1 + tt * (f.big ? 12 : 7));
+      }
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+      const dt = (now - f.t0) / 16;
+      ctx.save();
+      ctx.translate(f.x + f.vx * dt, f.y + f.vy * dt + 0.02 * dt * dt);
+      ctx.rotate(f.rot + f.vr * dt);
+      ctx.globalAlpha = 1 - t * t;
+      ctx.fillStyle = f.c;
+      ctx.fillRect(-4, -2.5, 8, 5);
+      ctx.restore();
+    }
+  }
   requestRender();
 }
 
@@ -2297,20 +2557,29 @@ function drawMatch() {
   if (m.win !== 'score') { ctx.fillRect(...zone); ctx.globalAlpha = 0.7; ctx.strokeRect(...zone); }
   ctx.restore();
   if (m.status !== 'defending') return;
-  // Movement rings and the ball keep-out.
+  if (A.threats) drawThreats(A.threats);
+  // Each defender leaves a tether back to where they started the phase;
+  // the movement ring shows only for the player you're touching.
   const R = RING[m.difficulty];
+  const active = (drag && drag.target.team === 'home' && drag.target) || homeSide().find((p) => p.id === state.selected || p.id === state.hover);
   ctx.save();
-  ctx.lineWidth = lineWidthM(0.14);
+  ctx.lineWidth = lineWidthM(0.12);
   for (const p of homeSide()) {
     const s = m.starts.get(p.id);
-    ctx.strokeStyle = 'rgba(191,219,254,0.55)';
-    ctx.fillStyle = 'rgba(191,219,254,0.06)';
+    ctx.fillStyle = 'rgba(191,219,254,0.55)';
+    dot(s.x, s.y, 0.35);
+    if (dist(p, s) > 0.5) { ctx.strokeStyle = 'rgba(191,219,254,0.45)'; line(s.x, s.y, p.x, p.y); }
+  }
+  if (active) {
+    const s = m.starts.get(active.id);
+    ctx.strokeStyle = 'rgba(191,219,254,0.85)';
+    ctx.fillStyle = 'rgba(191,219,254,0.1)';
+    ctx.lineWidth = lineWidthM(0.18);
     ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = 'rgba(191,219,254,0.6)';
-    dot(s.x, s.y, 0.3);
   }
   ctx.setLineDash([0.4, 0.4]);
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = lineWidthM(0.12);
   circle(state.ball.x, state.ball.y, BALL_KEEPOUT);
   ctx.restore();
 }
@@ -2321,17 +2590,20 @@ function renderMatchUI() {
   const m = state.match;
   const keepText = $('#match-text')?.value;
   try { renderMatchPanel(m); } finally { if (keepText != null && $('#match-text')) $('#match-text').value = keepText; }
+  renderResult();
+  $('#match-quick').hidden = !!m;
+  $('#stage').classList.toggle('in-match', !!m);
 }
 function renderMatchPanel(m) {
   $('#lockin').hidden = !(m && m.status !== 'over');
   $('#lockin').disabled = !(m && m.status === 'defending');
   $('#play').hidden = !!m;
-  for (const b of document.querySelectorAll('[data-tool]')) b.disabled = !!m && b.dataset.tool !== 'move';
+  for (const b of document.querySelectorAll('[data-tool]')) b.hidden = !!m && b.dataset.tool !== 'move';
   if (!m) {
     const p = PRESETS[matchPreset];
     setHTML($('#match-ui'), `
-      <p class="muted" style="margin-top:0">They attack, you defend. Move your players inside their rings each phase, then lock in.</p>
-      <div class="row"><select id="match-preset" class="grow">${PRESETS.map((q, i) => `<option value="${i}" ${i === matchPreset ? 'selected' : ''}>${esc(q.name)}</option>`).join('')}</select></div>
+      <p class="muted" style="margin-top:0">They attack, you defend. Each phase, drag your players to cut their passing lanes, then lock in. Record: ${esc(recordText())}</p>
+      <div class="row"><select id="match-preset" class="grow">${PRESETS.map((q, i) => `<option value="${i}" ${i === matchPreset ? 'selected' : ''}>${'★'.repeat(q.stars || 2)}${'☆'.repeat(3 - (q.stars || 2))}  ${esc(q.name)}</option>`).join('')}</select></div>
       <p style="margin:4px 0">${esc(p.desc)}</p>
       <div class="row">Difficulty <span class="seg">${Object.keys(RING).map((d) =>
         `<button data-diff="${d}" aria-pressed="${d === matchDifficulty}">${d[0].toUpperCase() + d.slice(1)} · ${RING[d]} m</button>`).join('')}</span></div>
@@ -2341,7 +2613,7 @@ function renderMatchPanel(m) {
       ${matchNote ? `<p class="muted">${esc(matchNote)}</p>` : ''}`);
     return;
   }
-  const status = { defending: 'Move your players inside their rings, then lock in.', thinking: 'They’re reading your shape…', resolving: 'Playing it out…', over: '' }[m.status];
+  const status = { defending: 'Drag your players to cut the red lanes, then lock in.', thinking: 'They’re reading your shape…', resolving: 'Playing it out…', over: '' }[m.status];
   const log = m.log.slice().reverse().map((e) => `<li style="display:block"><b>Phase ${e.phase}</b> · ${esc(e.action)}${e.source === 'heuristic' ? ' <span class="muted">(built-in)</span>' : ''}<br>
     <i>“${esc(e.thinking)}”</i><br>${esc(e.outcome)}${e.note ? `<br><span class="muted">${esc(e.note)}</span>` : ''}</li>`).join('');
   setHTML($('#match-ui'), `
@@ -2374,6 +2646,38 @@ $('#match-ui').addEventListener('click', (ev) => {
 $('#match-ui').addEventListener('change', (ev) => { if (ev.target.id === 'match-preset') { matchPreset = +ev.target.value; renderMatchUI(); } });
 $('#lockin').addEventListener('click', lockIn);
 let requestDebrief = () => {};
+
+// Result card over the board: the moment the game ends, what happened
+// and the obvious next moves, without opening the panel.
+function renderResult() {
+  const m = state.match, el = $('#result');
+  if (!m || m.status !== 'over') { el.hidden = true; return; }
+  el.hidden = false;
+  const next = PRESETS[(PRESETS.indexOf(m.setup) + 1) % PRESETS.length] || PRESETS[0];
+  setHTML(el, `<div class="card ${m.result.you ? 'won' : 'lost'}">
+    <div class="big">${m.result.you ? 'You win!' : m.result.reason.startsWith('Goal') ? 'Goal. They score.' : 'They got through.'}</div>
+    <p>${esc(m.result.reason)}</p>
+    <p class="rec">${esc(recordText())}</p>
+    <div class="debrief">${m.debrief ? esc(m.debrief).split(/\n\s*\n/).map((p) => `<p>${p}</p>`).join('') : ''}</div>
+    <div class="row">
+      <button class="btn primary" data-r="retry">Try again</button>
+      <button class="btn" data-r="next">Next: ${esc(next.name)}</button>
+      <button class="btn" data-r="debrief" ${m.debrief ? 'hidden' : ''}>Debrief</button>
+      <button class="btn" data-r="exit">Back to board</button>
+    </div></div>`);
+}
+$('#result').addEventListener('click', (ev) => {
+  const t = ev.target.closest('[data-r]');
+  if (!t) return;
+  const m = state.match;
+  if (t.dataset.r === 'retry') startMatch(m.setup, m.difficulty);
+  else if (t.dataset.r === 'next') {
+    matchPreset = (PRESETS.indexOf(m.setup) + 1) % PRESETS.length;
+    startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]);
+  } else if (t.dataset.r === 'debrief') requestDebrief();
+  else if (t.dataset.r === 'exit') exitMatch();
+  requestRender();
+});
 renderMatchUI();
 
 /* ================================================================
@@ -2383,6 +2687,12 @@ renderMatchUI();
    the outcome agree. Anything unusable falls back to the heuristic.
    ================================================================ */
 let aiOff = false;           // set when no route to a model exists; retried each new match
+let noModelShown = false;
+function noModelNotice() {
+  if (noModelShown) return;
+  noModelShown = true;
+  toast('No model connected: you’re playing the built-in opponent');
+}
 const f1 = (v) => v.toFixed(1);
 const rulesText = () => `Resolution rules (the board's engine applies exactly these):
 - Your runs happen first; the defenders do NOT move after locking in. Each run is at most ${MATCH_RUN_CAP} m. "bend" in [-0.7, 0.7] curves a run but only its end point matters for the outcome.
@@ -2454,7 +2764,8 @@ getOpponentPlan = async () => {
     return plan;
   } catch (err) {
     if (err.unavailable) aiOff = true;
-    toast(err.unavailable ? 'No model available: using the built-in opponent' : 'The model’s move was unusable: using the built-in opponent');
+    if (!err.unavailable) toast('The model’s move was unusable: using the built-in opponent');
+    else noModelNotice();
     return null;
   }
 };
@@ -2497,7 +2808,7 @@ async function startFromModel(description, fallback) {
   } catch (err) {
     if (err.unavailable) aiOff = true;
     if (!fallback) { matchBusy = false; matchNote = err.message; renderMatchUI(); return; }
-    toast(`${err.unavailable ? 'No model available' : 'Model setup unusable'}: using the built-in setup`);
+    if (err.unavailable) noModelNotice(); else toast('Model setup unusable: using the built-in setup');
   }
   matchBusy = false;
   matchNote = '';
@@ -2535,6 +2846,7 @@ Write exactly three short paragraphs of plain text, no markdown, no headings, no
   }
   m.debriefing = false;
   renderMatchUI();
+  renderResult();
 };
 
 /* ================================================================
@@ -2565,7 +2877,8 @@ window.addEventListener('keydown', (ev) => {
   else if (k === 'p') setTool('pass');
   else if (k === 'b') backToBase();
   else if (k === ' ') { ev.preventDefault(); state.match ? lockIn() : play(); }
-  else if (k === 'c') state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage];
+  else if (k === 'c') { state.coverage = { control: 'zones', zones: 'off', off: 'control' }[state.coverage]; state.view = 'custom'; }
+  else if (k === 'l') cycleView();
   else if (k === 'escape') state.selected = null;
   else if (k === 'delete' || k === 'backspace') {
     const p = state.players.find((q) => q.id === state.selected);
@@ -2664,9 +2977,14 @@ $('#selected').addEventListener('click', (ev) => {
 });
 
 // Layers
-for (const b of document.querySelectorAll('[data-cov]')) b.addEventListener('click', () => { state.coverage = b.dataset.cov; requestRender(); });
-for (const cb of document.querySelectorAll('[data-layer]')) cb.addEventListener('change', () => { state.layers[cb.dataset.layer] = cb.checked; requestRender(); });
+$('#views').innerHTML = VIEW_ORDER.map((v) => `<button data-view="${v}">${VIEWS[v].label}</button>`).join('');
+for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
+for (const b of document.querySelectorAll('[data-cov]')) b.addEventListener('click', () => { state.coverage = b.dataset.cov; state.view = 'custom'; requestRender(); });
+for (const cb of document.querySelectorAll('[data-layer]')) cb.addEventListener('change', () => { state.layers[cb.dataset.layer] = cb.checked; if (cb.dataset.layer !== 'roles') state.view = 'custom'; requestRender(); });
 function syncLayers() {
+  for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === state.view));
+  const vb = $('#view-btn .wide');
+  if (vb) vb.textContent = ` ${VIEWS[state.view]?.label || 'Custom'}`;
   for (const b of document.querySelectorAll('[data-cov]')) b.setAttribute('aria-pressed', String(b.dataset.cov === state.coverage));
   for (const cb of document.querySelectorAll('[data-layer]')) cb.checked = state.layers[cb.dataset.layer];
 }
@@ -2703,7 +3021,7 @@ $('#saved-list').addEventListener('click', (ev) => {
 });
 renderSaved();
 
-// Panel sheet (narrow screens) and first-run hint
+// Panel sheet (narrow screens) and first-run welcome
 function setPanel(open) {
   $('#panel').classList.toggle('open', open);
   $('#panel-open').setAttribute('aria-expanded', String(open));
@@ -2711,11 +3029,19 @@ function setPanel(open) {
 $('#panel-open').addEventListener('click', () => setPanel(!$('#panel').classList.contains('open')));
 $('#panel-close').addEventListener('click', () => setPanel(false));
 const HINT_KEY = 'tacticsLab.hintDismissed';
-$('#hint').hidden = !!store.get(HINT_KEY, false);
-const dismissHint = () => { if (!$('#hint').hidden) { $('#hint').hidden = true; store.set(HINT_KEY, true); } };
-$('#hint-close').addEventListener('click', dismissHint);
-// Once someone has touched the board they've found the controls; don't keep covering the toasts.
-canvas.addEventListener('pointerdown', dismissHint);
+$('#welcome').hidden = !!store.get(HINT_KEY, false);
+const closeWelcome = () => { $('#welcome').hidden = true; store.set(HINT_KEY, true); };
+$('#w-board').addEventListener('click', closeWelcome);
+$('#w-match').addEventListener('click', () => { closeWelcome(); quickMatch(); });
+$('#welcome').addEventListener('click', (ev) => { if (ev.target.id === 'welcome') closeWelcome(); });
+
+function quickMatch() {
+  if (anim || state.match) return;
+  setPanel(false);
+  startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]);
+}
+$('#match-quick').addEventListener('click', quickMatch);
+$('#view-btn').addEventListener('click', cycleView);
 
 /* ================================================================
    Render loop (on demand) and resize
@@ -2728,17 +3054,19 @@ function requestRender() {
     renderQueued = false;
     analyse();
     drawPitch();
-    if (state.coverage === 'control') drawControl();
-    else if (state.coverage === 'zones') drawZones();
-    if (state.layers.shape) drawShape();
-    if (state.layers.offside) drawOffside();
-    if (state.layers.lanes) { drawLanes(A.selLanes, true); drawLanes(A.lanes, false); }
+    if (state.coverage === 'control' && !state.match) drawControl();
+    else if (state.coverage === 'zones' && !state.match) drawZones();
+    if (state.layers.shape && !state.match) drawShape();
+    if (state.layers.offside || state.match) drawOffside();
+    if (state.layers.lanes && !state.match) { drawLanes(A.selLanes.filter((l) => !l.blocker), true); drawLanes(A.lanes, false); }
     if (state.match) drawMatch();
     drawRuns();
     drawPasses();
     if (DEBUG) drawDebug();
     drawPlayers();
+    drawFx();
     updateReadout();
+    updateHud();
     syncControls();
     syncLayers();
     if (!anim && !drag) scheduleSave();

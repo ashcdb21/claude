@@ -168,6 +168,7 @@
   dl.stats dt { color: var(--muted); }
   dl.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
   .muted { color: var(--muted); }
+  #side h3.sub { font: 600 12px var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
   .small { font-size: 13px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
@@ -252,6 +253,27 @@
   .scoreboard .tm.r { text-align: right; }
   .scoreboard .sc { font: 900 40px/1 var(--display); font-variant-numeric: tabular-nums; }
   .feed { display: grid; gap: 6px; }
+  .how { margin-top: 10px; display: grid; gap: 4px; }
+  .hrow { display: grid; grid-template-columns: minmax(0, 1.3fr) 1fr auto; gap: 8px; align-items: center; }
+  .hbar { height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; }
+  .hbar i { display: block; height: 100%; background: var(--home); }
+  .how.away .hbar i { background: var(--away); }
+  .guide ol { margin: 8px 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+  .ltable { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .ltable th, .ltable td { padding: 5px 4px; text-align: right; border-bottom: 1px solid var(--line-soft); }
+  .ltable th { font: 600 11px var(--body); letter-spacing: .1em; color: var(--muted); }
+  .ltable .l { text-align: left; }
+  .ltable tr.us td { color: var(--armband); font-weight: 700; }
+  .results { display: grid; gap: 4px; font-size: 14px; }
+  .results > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+  .results > div span:last-child { text-align: right; }
+  .results > div b { font-variant-numeric: tabular-nums; }
+  .results > div.us { color: var(--armband); }
+  .srow { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+  .srow .grow { min-width: 0; }
+  .tag { display: inline-block; font: 700 10px var(--body); letter-spacing: .08em; text-transform: uppercase; padding: 2px 6px; border-radius: 6px; vertical-align: 2px; }
+  .tag.bad { background: color-mix(in srgb, var(--bad, #e5484d) 25%, transparent); }
+  .tag.good { background: color-mix(in srgb, var(--good, #3dd68c) 25%, transparent); }
   .feed .it { display: grid; grid-template-columns: 2.6em 1fr auto; gap: 8px; align-items: center; background: var(--night); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
   .feed .it .m { font: 800 16px var(--display); color: var(--muted); }
   .feed .it.goal { box-shadow: inset 3px 0 0 var(--armband); } .feed .it.goal .txt { font-weight: 700; }
@@ -2586,6 +2608,19 @@ function engCreate(input) {
     t0: 0, T: 0, H: 0, from: null, to: null, aim: null, tried: null, odds: 0, offIds: null, lineAt: null, passerU: null, pressers: null, contested: false,
     zone: '', result: '', blocker: null, shooter: null };
   holder.gotAt = 0; holder.mode = 'carry'; holder.nextDecide = 0.45;
+  // A test is a hundred versions of the situation, not one frozen picture
+  // replayed: each run nudges everyone a little from where they were drawn
+  // and varies how long the man on the ball takes to look up. Seeded, so
+  // two tests on the same seeds still get the same versions.
+  if (input.vary) {
+    const r = rngFrom(((input.seed >>> 0) ^ 0x9e3779b9) >>> 0);
+    for (const p of w.players) {
+      if (p === holder || p.pos === 'GK') continue;
+      p.x = clamp(p.x + gauss(r) * 2, 0.5, PITCH.L - 0.5); p.y = clamp(p.y + gauss(r) * 2, 0.5, PITCH.W - 0.5);
+      p.target = { x: p.x, y: p.y };
+    }
+    holder.nextDecide = 0.3 + r() * 0.5;
+  }
   if (input.transition) { w.T[input.poss].wonAt = 0; w.T[oppOf(input.poss)].lostAt = 0; }
   w.T[input.poss].possStart = 0;
   return w;
@@ -2875,7 +2910,9 @@ function thinkDefend(w, team) {
   // how eager his role is) closes down; more with "more" intensity, with a
   // trigger, or in the counter-press. Outside the zone one man contains.
   if (carrier) {
-    const on = (bd <= PRESS_ZONE[ins.engage] && inTrap) || cpress || (trapping && bd < 30);
+    // With a trap set we still press everywhere in our zone, but from the
+    // angle that shuts the escape route; the swarm comes once it is in the trap.
+    const on = bd <= PRESS_ZONE[ins.engage] || cpress;
     // Men told to stay in shape don't press unless it's in front of our own box.
     const cands = mine.filter((d) => d.pos !== 'GK' && !busy.has(d) && d.stun <= w.t && (d.pi !== 'hold' || bd < 25))
       .map((d) => ({ d, t: pressTime(d, carrier) / Math.sqrt(d.pk) }))
@@ -2921,11 +2958,11 @@ function thinkDefend(w, team) {
   // the long ball.
   // When we press in their half the whole side steps up man-for-man: the
   // further forward the press, the further the midfield pushes onto theirs.
-  const pressing = carrier && ((bd <= PRESS_ZONE[ins.engage] && inTrap) || cpress);
+  const pressing = carrier && (bd <= PRESS_ZONE[ins.engage] || cpress);
   const sprung = trapping && inTrap && !cpress;
   const lock = pressing && (cpress || ins.press !== 'less' || sprung);
   if (lock) {
-    const reach = cpress ? 22 : bd > 55 ? 32 : 22;           // how far from the ball we lock on
+    const reach = cpress ? 22 : bd > 55 || sprung ? 32 : 22;           // how far from the ball we lock on
     const step = cpress || ins.press === 'more' || sprung ? 1.1 : 2.2;  // how tight (m, ball side)
     const ranked = attackers.filter((a) => a !== carrier && !taken.has(a) && hyp(a.x - carrier.x, a.y - carrier.y) < reach)
       .sort((a, c) => hyp(a.x - carrier.x, a.y - carrier.y) - hyp(c.x - carrier.x, c.y - carrier.y));
@@ -3763,7 +3800,7 @@ function perTick(w) {
       if (ins.pressTo !== 'none' && d.mode === 'press') {
         // Stand on the far side so the only way out is towards the trap.
         const ty = trapY(ins.pressTo, c.team, c.y);
-        if (Math.abs(c.y - ty) > 1) { vy += Math.sign(c.y - ty) * 0.8; const m = hyp(vx, vy); vx /= m; vy /= m; }
+        if (Math.abs(c.y - ty) > 1) { vy += Math.sign(c.y - ty) * 0.35; const m = hyp(vx, vy); vx /= m; vy /= m; }
       } else if (ins.show !== 'none' && d.mode === 'press') {
         // Stand off-centre so the open side is the one we want him to take.
         const toMid = Math.sign(MID - c.y) || 1;
@@ -3982,43 +4019,43 @@ function engRun(input, record = false) {
    across the pitch from their left touchline.
    ================================================================ */
 const SITUATIONS = [
-  { id: 'press', name: 'Their build-up v our press', has: 'away', at: [5, 34], carrier: ['GK'],
+  { id: 'press', maxT: 20, name: 'Their build-up v our press', has: 'away', at: [5, 34], carrier: ['GK'],
     brief: 'Their keeper has it. Does your press win it back high, or do they play through you and hurt you?',
     primary: { key: 'winHigh', label: 'Won it back in their half', good: 'up' },
     levers: { home: ['engage', 'pressTo', 'press', 'line', 'marking'], away: ['buildUp', 'passing', 'tempo'] } },
-  { id: 'buildup', name: 'Our build-up v their press', has: 'home', at: [5, 34], carrier: ['GK'],
+  { id: 'buildup', maxT: 20, name: 'Our build-up v their press', has: 'home', at: [5, 34], carrier: ['GK'],
     brief: 'Your keeper has it and they come to press. Play through them, go over them, or lose it in a dangerous place?',
     primary: { key: 'half', label: 'Got it into their half', good: 'up' },
     levers: { home: ['buildUp', 'passing', 'tempo', 'width'], away: ['engage', 'press'] } },
-  { id: 'block', name: 'Their build-up v our block', has: 'away', at: [28, 20], carrier: ['CB'],
+  { id: 'block', maxT: 20, name: 'Their build-up v our block', has: 'away', at: [28, 20], carrier: ['CB'],
     brief: 'Their centre-back has it. Does your block keep them in front of you, or do they find a way through?',
     primary: { key: 'final3Ag', label: 'They reached our final third', good: 'down' },
     levers: { home: ['engage', 'pressTo', 'line', 'compact', 'press', 'marking'], away: ['passing', 'width', 'focus'] } },
-  { id: 'midfield', name: 'Our attack from midfield', has: 'home', at: [46, 30], carrier: ['DM', 'CM'],
+  { id: 'midfield', maxT: 20, name: 'Our attack from midfield', has: 'home', at: [46, 30], carrier: ['DM', 'CM'],
     brief: 'Your midfielder has it just inside your half, facing forward. Can you break their block?',
     primary: { key: 'final3', label: 'Reached their final third', good: 'up' },
     levers: { home: ['passing', 'tempo', 'width', 'runs', 'focus'], away: ['line', 'compact', 'press'] } },
-  { id: 'lowblock', name: 'Break down a low block', has: 'home', at: [62, 34], carrier: ['CM', 'DM', 'AM'], force: { away: { line: 'deep', engage: 'low', press: 'less' } },
+  { id: 'lowblock', maxT: 24, name: 'Break down a low block', has: 'home', at: [62, 34], carrier: ['CM', 'DM', 'AM'], force: { away: { line: 'deep', engage: 'low', press: 'less' } },
     brief: 'They sit deep around their box with no intention of pressing. Find a way in.',
     primary: { key: 'box', label: 'Got into their box', good: 'up' },
     levers: { home: ['width', 'focus', 'crossing', 'final', 'runs', 'tempo'], away: ['compact', 'marking'] } },
-  { id: 'overload', name: 'Wide overload', has: 'home', at: [70, 58], carrier: ['W', 'WM', 'WB', 'FB'],
+  { id: 'overload', maxT: 15, name: 'Wide overload', has: 'home', at: [70, 58], carrier: ['W', 'WM', 'WB', 'FB'],
     brief: 'Your wide man has it on the right, level with their box. Who supports him, and what does he do?',
     primary: { key: 'box', label: 'Got into their box', good: 'up' },
     levers: { home: ['crossing', 'dribbling', 'runs', 'final'], away: ['compact', 'marking', 'tackling'] } },
-  { id: 'counter', name: 'Counter: we win it in midfield', has: 'home', at: [50, 30], carrier: ['CM', 'DM'], transition: true,
+  { id: 'counter', maxT: 12, name: 'Counter: we win it in midfield', has: 'home', at: [50, 30], carrier: ['CM', 'DM'], transition: true,
     brief: 'You have just won it on halfway while they were attacking. Their shape is all wrong. Go.',
     primary: { key: 'shotFor', label: 'Got a shot away', good: 'up' },
     levers: { home: ['onWin', 'tempo', 'passing', 'runs', 'dribbling'], away: ['onLoss', 'line'] } },
-  { id: 'rest', name: 'Stop their counter', has: 'away', at: [52, 36], carrier: ['CM', 'DM'], transition: true,
+  { id: 'rest', maxT: 12, name: 'Stop their counter', has: 'away', at: [52, 36], carrier: ['CM', 'DM'], transition: true,
     brief: 'You were attacking and lost it on halfway. Is your rest defence good enough, and does your counter-press win it back?',
     primary: { key: 'boxAg', label: 'They reached our box', good: 'down' },
     levers: { home: ['onLoss', 'line', 'engage'], away: ['onWin', 'tempo', 'runs'] } },
-  { id: 'edge', name: 'Edge of our box', has: 'away', at: [78, 32], carrier: ['AM', 'CM', 'ST'],
+  { id: 'edge', maxT: 14, name: 'Edge of our box', has: 'away', at: [78, 32], carrier: ['AM', 'CM', 'ST'],
     brief: 'They have it 27 m out with runners around your box.',
     primary: { key: 'shotAg', label: 'They got a shot away', good: 'down' },
     levers: { home: ['compact', 'marking', 'press', 'tackling', 'line'], away: ['final', 'dribbling', 'runs'] } },
-  { id: 'theirwide', name: 'Their wide attack', has: 'away', at: [80, 60], carrier: ['W', 'WM', 'WB', 'FB'],
+  { id: 'theirwide', maxT: 14, name: 'Their wide attack', has: 'away', at: [80, 60], carrier: ['W', 'WM', 'WB', 'FB'],
     brief: 'Their winger has it on their right, level with your box. Stop the cross, or win what comes in.',
     primary: { key: 'shotAg', label: 'They got a shot away', good: 'down' },
     levers: { home: ['compact', 'marking', 'press', 'tackling'], away: ['crossing', 'dribbling', 'runs'] } },
@@ -4134,12 +4171,12 @@ function compareMetric(a, b, key) {
   const d = (up - down) / n, se = Math.sqrt(Math.max(up + down - ((up - down) ** 2) / n, 0)) / n;
   return { d: 100 * d, sig: up + down >= 4 && Math.abs(d) > 2 * se };
 }
-function runInput(teams, setup, seed, maxT) {
-  return { teams, pos: setup.pos, ball: setup.ball, poss: setup.poss, holder: setup.holder, transition: setup.transition, seed, maxT };
+function runInput(teams, setup, seed, maxT, vary = true) {
+  return { teams, pos: setup.pos, ball: setup.ball, poss: setup.poss, holder: setup.holder, transition: setup.transition, seed, maxT, vary };
 }
 // Synchronous batch (the page runs it in slices so the screen stays live).
-function engBatch(teams, setup, n = TEST_RUNS, seed = TEST_SEED, from = 0, agg = newAgg()) {
-  for (let i = from; i < n; i++) addRun(agg, engRun(runInput(teams, setup, seed * 7919 + i)));
+function engBatch(teams, setup, n = TEST_RUNS, seed = TEST_SEED, from = 0, agg = newAgg(), maxT) {
+  for (let i = from; i < n; i++) addRun(agg, engRun(runInput(teams, setup, seed * 7919 + i, maxT)));
   return agg;
 }
 
@@ -4326,7 +4363,7 @@ function insights(agg, teams, sit, unit = 'runs') {
    that sits deep invites more "break down a low block"). Each is played
    once; the goals are real goals from the simulation.
    ================================================================ */
-const MOMENTS_PER_HALF = 18;
+const MOMENTS_PER_HALF = 28;
 // How often each situation comes up: build-up and midfield phases are
 // common but rarely decisive, so the moments lean towards the final third
 // (where a real game's chances come from), shaped by both styles.
@@ -4379,61 +4416,147 @@ function summarize(w, sit) {
    by changing the tactic. Goals are measured over the same 100 runs as
    the lab, so a lesson passes on football reasons, not a lucky run.
    ================================================================ */
-const GOALS_BEAT_PRESS = [{ key: 'lostOwnThird', op: '<=', v: 13 }, { key: 'half', op: '>=', v: 60 }, { key: 'half', op: '>=', v: 66 }];
+// Goals and hints come from searching each lesson's levers over 200 varied runs:
+// the start fails, the principle the lesson teaches earns the pass, and the
+// third star needs it combined with a second idea.
+const GOALS_BEAT_PRESS = [{ key: 'lostOwnThird', op: '<=', v: 14 }, { key: 'half', op: '>=', v: 62 }, { key: 'half', op: '>=', v: 72 }];
 const LESSONS = [
   { id: 'press-unit', title: 'Press as a unit', sit: 'press', opp: 'castello', style: 'balanced', set: { engage: 'mid', line: 'standard', press: 'normal' },
     levers: ['engage', 'line', 'press', 'pressTo', 'marking'],
-    idea: 'A high press only works if the whole team moves up with it. When the forwards press but the defence stays deep, the gaps between the lines are huge and one pass beats the lot.',
+    idea: 'Where your press starts decides what it can win. Wait on halfway and a patient side walks the ball out of its own third; step up and their centre-backs and keeper have to play under pressure, where one bad touch is a chance.',
     task: 'Castello play out from the back. Win the ball back in their half.',
-    goals: [{ key: 'winHigh', op: '>=', v: 25 }, { key: 'shotFor', op: '>=', v: 15 }, { key: 'winHigh', op: '>=', v: 29 }],
-    hints: ['Where does your press start? Try the line of engagement.', 'Pressing high with the defence back where it was stretches you. Push the line up as well.', 'Watch a run and look at the distance between your defence and your forwards.'],
-    debrief: 'Engagement and line height work together: a high press with a high line keeps the distances between your units short, so their short passes are covered and they have to kick it long.' },
+    goals: [{ key: 'winHigh', op: '>=', v: 25 }, { key: 'shotFor', op: '>=', v: 14 }, { key: 'winHigh', op: '>=', v: 27 }],
+    hints: ['Where does your press start? Look at the line of engagement.', 'Pressing harder from halfway only chases them. Start the press where their build-up is.', 'Watch a run: when you win it high, how far is it to their goal?'],
+    debrief: 'The line of engagement is the lever that matters here: pressing from their third turns their build-up into your best chance to score, because every ball you win is 30 m from goal. Pressing intensity and traps only refine a press that starts in the right place.' },
   { id: 'beat-press', title: 'Beat the press', sit: 'buildup', opp: 'hartwell', style: 'balanced', set: { buildUp: 'short', width: 'narrow', passing: 'short' },
     levers: ['passing', 'width', 'buildUp', 'tempo', 'focus'], roleLevers: ['GK', 'DM'],
-    idea: 'Short, narrow passing is exactly what a pressing side wants: every receiver is within reach of a presser. To beat the press you have to make the pitch big and be willing to play past the first line, not just around it.',
+    idea: 'Short passing out from the back is exactly what a pressing side wants: every pass goes to someone they can reach. To beat the press you have to be willing to play past the first line, not just around it.',
     task: 'Hartwell press everything. Get the ball into their half without losing it in your own third.',
     goals: GOALS_BEAT_PRESS,
-    hints: ['Watch where you lose it. How far apart are your players?', 'Width stretches the pressers: more space between them.', 'Only passing short means the press never has to cover a long ball. Mix it up.'],
-    debrief: 'Against a press, distances decide everything. Spread out and each presser has more ground to cover; mix in longer passes and they can\u2019t squeeze you without leaving space behind.' },
+    hints: ['Watch where you lose it. Who is the pass to, and how many of them are near him?', 'Going longer from the back skips their first line of pressers.', 'Mixing longer passes into the build-up means they can’t squeeze every short option. Spreading wider on its own won’t do it.'],
+    debrief: 'The ball that beats a press goes past the first line. Build up longer, or mix longer passes into your play, and the pressers can’t just squeeze the short options. Width alone made it worse here: short passes into wide areas are still the passes they are waiting for.' },
   { id: 'rest-defence', title: 'Rest defence', sit: 'rest', opp: 'solano', style: 'gegenpress', set: { onLoss: 'mixed' },
-    levers: ['onLoss', 'line', 'engage'], roleLevers: ['FB', 'DM'],
-    idea: 'When you attack, the players you leave behind the ball decide what happens when you lose it. Wing-backs bombing on and a high line are an open door for a quick counter.',
+    levers: ['onLoss', 'line', 'engage'], roleLevers: ['FB', 'WB', 'DM'],
+    idea: 'When you attack, the players you leave behind the ball decide what happens when you lose it. Wing-backs bombing on and a sitting anchor leave a pacy front three running at two centre-backs.',
     task: 'You lose the ball on halfway with your wing-backs high. Solano break at pace. Stop them reaching your box.',
-    goals: [{ key: 'boxAg', op: '<=', v: 50 }, { key: 'boxAg', op: '<=', v: 30 }, { key: 'shotAg', op: '<=', v: 20 }],
-    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'Against pace, a lower line leaves less space to run into.'],
-    debrief: 'Two things stop a counter: winning the ball back before it starts, and leaving no space for it to go. A midfielder who attacks the ball does the first; a lower line does the second.' },
-  { id: 'low-block', title: 'Break down a low block', sit: 'lowblock', opp: 'staldric', style: 'balanced', set: { runs: 'many', focus: 'middle' },
-    levers: ['focus', 'runs', 'width', 'crossing', 'tempo', 'final'], roleLevers: ['W'],
-    idea: 'A deep, narrow block has no space in behind and none in the middle. Runs in behind have nowhere to go; the space is on the flanks, and patience finds it.',
+    goals: [{ key: 'boxAg', op: '<=', v: 40 }, { key: 'shotAg', op: '<=', v: 26 }, { key: 'quickWin', op: '>=', v: 70 }],
+    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'A full-back who tucks inside while you attack is already in the middle when you lose it.'],
+    debrief: 'The best rest defence stops the counter before it starts: a ball-winning midfielder steps into the first pass, and an inverted full-back beside him means there is help when he does. Dropping the line deeper only gave their runners a longer run at your box.' },
+  { id: 'low-block', title: 'Break down a low block', sit: 'lowblock', opp: 'staldric', style: 'balanced', set: { tempo: 'slow', focus: 'middle' }, roles: { 8: 'iw', 10: 'iw' },
+    levers: ['tempo', 'focus', 'width', 'runs', 'crossing', 'final'], roleLevers: ['W', 'CM'],
+    idea: 'A deep, narrow block wants you in the middle, where it has the numbers. Inverted wingers drifting inside and slow passing through the centre play straight into it.',
     task: 'St Aldric’s sit in a narrow five at the back. Get into their box.',
-    goals: [{ key: 'box', op: '>=', v: 40 }, { key: 'shotFor', op: '>=', v: 45 }, { key: 'box', op: '>=', v: 47 }],
-    hints: ['Where is the space against a narrow block?', 'Runs in behind need space behind. Is there any?', 'Get the ball to your wide players and let them attack their full-backs.'],
-    debrief: 'Against a low block the middle is crowded and there is no room in behind, so attacking through the wings and coming short beat running at a wall. Width moves the block; the gaps open inside it.' },
+    goals: [{ key: 'box', op: '>=', v: 28 }, { key: 'shotFor', op: '>=', v: 38 }, { key: 'box', op: '>=', v: 40 }],
+    hints: ['Where are your wingers standing? Where is the space against a narrow block?', 'A winger who stays wide pulls their wing-back out and opens the channel inside him.', 'Once the block is stretched, someone has to run into the gap: try a central midfielder as a mezzala.'],
+    debrief: 'Width first, then runs into the half-spaces. Wingers who stay wide make the back five defend the whole pitch; a mezzala then arrives in the channel between wing-back and centre-back, which is exactly the gap width opened.' },
   { id: 'counter', title: 'Counter at speed', sit: 'counter', opp: 'castello', style: 'balanced', set: { onWin: 'hold', tempo: 'slow', passing: 'short' },
     levers: ['onWin', 'tempo', 'passing', 'runs', 'dribbling'], roleLevers: ['ST', 'W'],
-    idea: 'The seconds after winning the ball are when the opponent is least organised. Go forward immediately, before they can recover their shape.',
+    idea: 'The seconds after winning the ball are when the opponent is least organised. Short, slow passing gives them the time to get back; forward passes played quickly don’t.',
     task: 'You win it on halfway while Castello are attacking. Get a shot away.',
-    goals: [{ key: 'shotFor', op: '>=', v: 40 }, { key: 'box', op: '>=', v: 35 }, { key: 'shotFor', op: '>=', v: 47 }],
-    hints: ['What does your team do the moment it wins the ball?', 'Keeping it and waiting gives them three seconds to get back.', 'Once you go, go forward: the first pass decides the counter.'],
-    debrief: 'A counter lives on the first seconds: forward passes into runners while their shape is broken. Holding the ball, however safely, lets them recover.' },
+    goals: [{ key: 'shotFor', op: '>=', v: 30 }, { key: 'box', op: '>=', v: 28 }, { key: 'shotFor', op: '>=', v: 46 }],
+    hints: ['Watch the first pass after you win it. Which way does it go?', 'Short passes keep the ball but let them recover. Go more direct.', 'Direct passing works best when it is quick too: raise the tempo as well.'],
+    debrief: 'A counter lives on its first passes: direct, forward and quick, into runners while their shape is broken. Each on its own helps; together they more than double your shots, because the ball arrives before the defence does.' },
   { id: 'edge', title: 'Defend the edge of the box', sit: 'edge', opp: 'rheinfeld', style: 'balanced', set: { press: 'less', marking: 'zonal', compact: 'wide' },
     levers: ['press', 'tackling', 'marking', 'compact', 'line'],
     idea: 'Near your own box, time on the ball is a chance. Someone must step out to the ball straight away, and the others must be close enough to help.',
     task: 'Rheinfeld have it 27 m out with runners around your box. Stop the shot.',
-    goals: [{ key: 'shotAg', op: '<=', v: 40 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 26 }],
-    hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'Winning the ball cleanly ends the danger; standing off invites the shot.'],
-    debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. Tackling hard helps here too, but it is a gamble inside the area.' },
-  { id: 'wide', title: 'Stop the cross', sit: 'theirwide', opp: 'kingsbridge', style: 'balanced', set: { compact: 'narrow', tackling: 'hard', press: 'normal' },
-    levers: ['press', 'compact', 'tackling', 'marking'], roleLevers: ['W'],
-    idea: 'Kingsbridge want their winger one-on-one against your full-back, then a cross for a big striker. Diving in gets you beaten; a narrow block leaves the winger all the room he wants.',
-    task: 'Their winger has it level with your box. Keep them from getting a shot away.',
-    goals: [{ key: 'shotAg', op: '<=', v: 70 }, { key: 'shotAg', op: '<=', v: 60 }, { key: 'shotAg', op: '<=', v: 56 }],
-    hints: ['Watch your full-back: does he stand up the winger or dive in?', 'Pressing less means jockeying: stay on your feet and show him down the line.', 'A narrow block protects the middle but hands them the flank.'],
-    debrief: 'Against a good winger, patience defends: jockey, show him wide, and keep the block wide enough that help arrives. Diving in is how he gets past, and the cross comes from there.' },
+    goals: [{ key: 'shotAg', op: '<=', v: 40 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 32 }],
+    hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'With the ball pressed, the block behind can be tighter, or the tackles can go in.'],
+    debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. A tighter block behind the pressure then takes away the pass that beats it.' },
+  { id: 'overload', title: 'Overload the flank', sit: 'overload', opp: 'kingsbridge', style: 'balanced', set: { dribbling: 'less', crossing: 'often' }, roles: { 1: 'dfb', 4: 'dfb' },
+    levers: ['dribbling', 'crossing', 'width', 'runs', 'final'], roleLevers: ['FB', 'W'],
+    idea: 'A winger alone against a full-back, with help coming, is not an attack. Two against one is: a full-back overlapping means the defender has to choose, and the winger can go the other way.',
+    task: 'Your winger has it on the right, level with their box. Get into the box.',
+    goals: [{ key: 'box', op: '>=', v: 14 }, { key: 'shotFor', op: '>=', v: 28 }, { key: 'box', op: '>=', v: 26 }],
+    hints: ['Watch your right-back. Does he join in?', 'A wing-back or attacking full-back overlaps and makes it two against one.', 'Once the defender has two to watch, let your winger take him on.'],
+    debrief: 'An overlapping full-back turns one against one into two against one. The defender has to choose, and whichever he picks, the other is free: with the winger encouraged to dribble, he goes inside the man who is watching the overlap.' },
 ];
 const lessonMetric = (M, key) => M[key];
 const goalMet = (M, g) => (g.op === '>=' ? lessonMetric(M, g.key) >= g.v - 1e-9 : lessonMetric(M, g.key) <= g.v + 1e-9);
 const goalText = (g) => `${METRICS[g.key]?.label || (g.key === 'xgFor' ? 'xG per attack' : g.key === 'xgAg' ? 'xG against per attack' : g.key)} ${g.op === '>=' ? 'at least' : 'at most'} ${g.key.startsWith('xg') ? g.v.toFixed(3) : g.v + '%'}`;
+
+/* ================================================================
+   The assistant proves its advice. It lists changes worth trying (every
+   other setting of the situation's key instructions, the role swaps that
+   matter there, and anything the diagnosis points to), tests each on the
+   same runs as your test, and only recommends what measurably helped —
+   with the side effects it measured. A suggestion that sounds right but
+   doesn't change the numbers is not advice.
+   ================================================================ */
+const ROLE_GROUPS = { home: ['CM', 'W', 'WM', 'ST', 'FB', 'WB', 'AM', 'DM'], away: ['DM', 'CM', 'ST', 'W', 'WM', 'FB', 'WB'] };
+function candidateChanges(teams, sit, diag) {
+  const t = teams.home.tactic, form = FORMATIONS[t.formation], out = [], seen = new Set();
+  const add = (c) => { const k = c.key ? `${c.key}=${c.value}` : `${c.slot}=${c.role}`; if (seen.has(k)) return; seen.add(k); out.push(c); };
+  for (const q of diag) for (const f of q.fixes) add(f);
+  for (const k of sit.levers.home) for (const [v, l] of INSTR[k].opts) if (v !== t.instr[k]) add({ team: 'home', key: k, value: v, label: `${INSTR[k].label}: ${l}` });
+  const groups = ROLE_GROUPS[sit.has === 'home' ? 'home' : 'away'];
+  form.forEach((slot, i) => {
+    const g = GROUP_OF[slot[2]];
+    if (!groups.includes(g)) return;
+    for (const r of rolesFor(g)) if (r.key !== t.roles[i]) add({ team: 'home', slot: i, role: r.key, label: `#${slot[4]} ${slot[2]} as ${r.name}` });
+  });
+  return out;
+}
+function applyChange(tactic, c) {
+  const t = JSON.parse(JSON.stringify(tactic));
+  if (c.key) t.instr[c.key] = c.value; else t.roles[c.slot] = c.role;
+  return t;
+}
+// How a tested change compares with the baseline, run for run.
+function judgeChange(base, cand, sit) {
+  const sign = (k) => (METRICS[k].good === 'up' ? 1 : -1);
+  const keys = [...new Set([sit.primary.key, 'shotFor', 'shotAg'])];
+  const d = Object.fromEntries(keys.map((k) => { const c = compareMetric(base, cand, k); return [k, { d: c.d, sig: c.sig, good: c.d * sign(k) }]; }));
+  const p = d[sit.primary.key];
+  const benefit = p.good + 0.4 * (d.shotFor?.good || 0) * (sit.primary.key === 'shotFor' ? 0 : 1) + 0.4 * (d.shotAg?.good || 0) * (sit.primary.key === 'shotAg' ? 0 : 1);
+  // Screening (100 runs) passes anything pointing the right way without a
+  // measured cost; the verdict comes from the longer confirmation run.
+  const promising = p.good >= 3 && !keys.some((k) => d[k].sig && d[k].good < 0);
+  const helps = p.sig && p.good > 0 && !keys.some((k) => d[k].sig && d[k].good < 0);
+  const hurts = keys.some((k) => d[k].sig && d[k].good < 0) && !promising;
+  return { d, benefit, promising, helps, hurts };
+}
+
+/* ================================================================
+   Season: a league of eight, everyone plays everyone once. Other
+   fixtures are played by the same engine, so the table is earned.
+   ================================================================ */
+const LEAGUE_IDS = ['us', 'hartwell', 'castello', 'rheinfeld', 'kingsbridge', 'solano', 'northgate', 'staldric'];
+// Circle method: 7 rounds of 4 fixtures.
+function leagueRounds() {
+  const ids = [...LEAGUE_IDS], rounds = [];
+  for (let r = 0; r < ids.length - 1; r++) {
+    const pairs = [];
+    for (let i = 0; i < ids.length / 2; i++) pairs.push([ids[i], ids[ids.length - 1 - i]]);
+    rounds.push(pairs);
+    ids.splice(1, 0, ids.pop());
+  }
+  return rounds;
+}
+function simMatch(teams, seed) {
+  const g = { home: 0, away: 0 }, xg = { home: 0, away: 0 };
+  for (const half of [1, 2]) for (const m of matchPlan(teams, seed, half)) {
+    const sit = SITUATIONS[m.sit], t = withForce(teams, sit), w = engRun(runInput(t, engSetup(t, sit), m.seed, sit.maxT));
+    if (w.outcome.kind === 'goal') g[w.outcome.team]++;
+    xg.home += w.T.home.S.xg; xg.away += w.T.away.S.xg;
+  }
+  return { g, xg };
+}
+function leagueTable(results) {
+  const row = Object.fromEntries(LEAGUE_IDS.map((id) => [id, { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }]));
+  for (const r of results.flat()) {
+    const a = row[r.a], b = row[r.b];
+    a.p++; b.p++; a.gf += r.ga; a.ga += r.gb; b.gf += r.gb; b.ga += r.ga;
+    if (r.ga > r.gb) { a.w++; b.l++; a.pts += 3; } else if (r.ga < r.gb) { b.w++; a.l++; b.pts += 3; } else { a.d++; b.d++; a.pts++; b.pts++; }
+  }
+  return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.ga) - (x.gf - x.ga) || y.gf - x.gf || x.id.localeCompare(y.id));
+}
+// Scouting: which situations this fixture will throw up most, and how your
+// current tactic copes in each against them compared with an average side.
+function scoutPlan(teams) {
+  const wts = matchWeights(teams), tot = Object.values(wts).reduce((a, b) => a + b, 0);
+  return Object.entries(wts).map(([id, v]) => ({ sit: SITUATIONS.findIndex((q) => q.id === id), share: v / tot })).sort((a, b) => b.share - a.share).slice(0, 4);
+}
 /* ANALYSIS END */
 
 /* ================================================================
@@ -4732,7 +4855,7 @@ function focusMoment(m) { if (m) seek(Math.max(0, m.t - 0.2), m); }
    ================================================================ */
 const lab = {
   sit: 0, setupT: false, result: null, pinned: null, marks: [], busy: false, progress: 0, insights: [], coachNote: '', coachBusy: false, showSpace: false, showPlan: true,
-  moved: new Set(), saved: null,
+  moved: new Set(), saved: null, proof: null,
   get play() { return replay.w ? replay : null; },
 };
 const LAB_KEY = 'tacticsLab.lab.v2';
@@ -4753,7 +4876,7 @@ function loadSituation(i, keepResults = false) {
   lab.moved = new Set();
   lab.setupT = !!sit.transition;
   replay.start = null;
-  if (!keepResults) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; lab.coachNote = ''; }
+  if (!keepResults) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; lab.coachNote = ''; lab.proof = null; }
   lab.marks = keepResults ? lab.marks : [];
   saveLab();
   renderSide();
@@ -4781,7 +4904,8 @@ function labWatch() {
   if (lab.busy || anim) return;
   if (replay.w) clearReplay(true);
   replay.start = saveStart();
-  const w = engRun(runInput(labTeams(), boardSetup(lab.setupT), (Math.random() * 1e9) >>> 0), true);
+  // One run exactly as you placed them (tests vary the picture).
+  const w = engRun(runInput(labTeams(), boardSetup(lab.setupT), (Math.random() * 1e9) >>> 0, labSit().maxT, false), true);
   lab.marks = [];
   startReplay(w);
 }
@@ -4794,7 +4918,7 @@ async function labTest() {
   const teams = labTeams(), setup = boardSetup(lab.setupT), sit = labSit(), agg = newAgg();
   const t0 = performance.now();
   for (let i = 0; i < TEST_RUNS; i += 10) {
-    for (let k = i; k < Math.min(TEST_RUNS, i + 10); k++) addRun(agg, engRun(runInput(teams, setup, TEST_SEED * 7919 + k)));
+    for (let k = i; k < Math.min(TEST_RUNS, i + 10); k++) addRun(agg, engRun(runInput(teams, setup, TEST_SEED * 7919 + k, sit.maxT)));
     lab.progress = (i + 10) / TEST_RUNS;
     renderSide();
     await new Promise((r) => setTimeout(r, 0));
@@ -4805,12 +4929,55 @@ async function labTest() {
   lab.marks = [...agg.shots.map((s) => ({ kind: s.result === 'goal' ? 'goal' : 'shot', team: s.team, x: s.x, y: s.y })),
     ...agg.regains.filter((r) => r.team === 'home').map((r) => ({ kind: 'won', team: 'home', x: r.x, y: r.y }))];
   lab.busy = false;
+  lab.proof = null;
   if (appMode === 'lessons') lessonScored();
   renderSide(); syncBars();
   requestRender();
+  if (appMode === 'lab') proveChanges();
 }
 
-// Apply one of the assistant's suggestions and test it against what you had.
+// The assistant tests before it advises. Every change worth trying runs on the
+// same 100 passages as your test (your hand-placed players stay put, the rest
+// take the new shape). Anything pointing the right way gets 200 more passages,
+// and only what still clearly helps over all 300 is recommended, with what it
+// cost. Checked offline against held-out runs, most recommendations keep
+// helping; a single 100-run screen alone mostly picked lucky noise.
+async function proveChanges() {
+  const r = lab.result, sit = labSit(), src = labSrc(), base = teamsOf(src);
+  const cands = candidateChanges(labTeams(), sit, lab.insights);
+  const proof = lab.proof = { busy: true, stage: 'screen', progress: 0, total: cands.length, tested: 0, found: [], same: 0, worse: 0 };
+  const board = boardSetup(lab.setupT), moved = new Set([...lab.moved].map((id) => state.players.find((p) => p.id === id)).filter((p) => p && p.team === 'home').map(slotOf));
+  const setupFor = (teams) => { const fresh = engSetup(teams, sit), pos = { home: board.pos.home.map((q, i) => (moved.has(i) ? q : fresh.pos.home[i])), away: board.pos.away }; return { ...board, pos }; };
+  const more = (agg, teams, setup, from, n) => { for (let k = from; k < from + n; k++) addRun(agg, engRun(runInput(teams, setup, TEST_SEED * 7919 + k, sit.maxT))); return agg; };
+  const alive = () => lab.proof === proof && lab.result === r;
+  const tick = async () => { renderSide(); await new Promise((res) => setTimeout(res, 0)); return alive(); };
+  const promising = [];
+  for (const c of cands) {
+    if (!(await tick())) return;
+    const teams = withForce({ ...base, home: { ...base.home, tactic: applyChange(base.home.tactic, c) } }, sit);
+    const setup = setupFor(teams), agg = more(newAgg(), teams, setup, 0, TEST_RUNS), j = judgeChange(r.agg, agg, sit);
+    proof.tested++; proof.progress = proof.tested / cands.length;
+    if (j.promising) promising.push({ c, teams, setup, agg, j }); else if (j.hurts) proof.worse++; else proof.same++;
+  }
+  promising.sort((a, b) => b.j.benefit - a.j.benefit);
+  const short = promising.slice(0, 6);
+  proof.same += promising.length - short.length;
+  if (short.length) {
+    proof.stage = 'confirm'; proof.progress = 0;
+    const baseAgg = more(more(newAgg(), labTeams(), board, 0, TEST_RUNS), labTeams(), board, TEST_RUNS, 2 * TEST_RUNS);
+    for (const [i, s] of short.entries()) {
+      if (!(await tick())) return;
+      const j = judgeChange(baseAgg, more(s.agg, s.teams, s.setup, TEST_RUNS, 2 * TEST_RUNS), sit);
+      proof.progress = (i + 1) / short.length;
+      if (j.helps) proof.found.push({ c: s.c, j }); else if (j.hurts) proof.worse++; else proof.same++;
+    }
+  }
+  proof.found.sort((a, b) => b.j.benefit - a.j.benefit);
+  proof.busy = false;
+  renderSide();
+}
+
+// Apply a proven change and test it against what you had.
 function tryFix(f) {
   if (lab.busy) return;
   if (lab.result) lab.pinned = lab.result;
@@ -4892,18 +5059,59 @@ function resultsHTML() {
     <p class="muted small">${TEST_RUNS} runs · ${esc(r.label)}${pin && pin !== r ? ' · compared with your pinned test' : ''}${stale ? ' · <span class="warn">tactics changed since this test</span>' : ''}</p>
     <div class="row"><button class="btn small" id="lab-pin">${pin === r ? 'Pinned' : 'Pin to compare'}</button>${appMode === 'lab' ? `<button class="btn small" id="lab-coach" ${lab.coachBusy ? 'disabled' : ''}>Ask the coach</button>` : ''}</div>
     ${lab.coachNote ? `<div class="callout">${lab.coachNote.split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join('<br>')}</div>` : ''}
-    <p class="legend"><span class="lg shot"></span>our shots <span class="lg shotag"></span>theirs <span class="lg won"></span>where we won it back</p>`;
+    <p class="legend"><span class="lg shot"></span>our shots <span class="lg shotag"></span>theirs <span class="lg won"></span>where we won it back</p>
+    ${shotsHowHTML(r.agg)}`;
+}
+// Where the shots came from: the move that led to each, over all runs.
+function shotsHowHTML(agg) {
+  const side = (team, label) => {
+    const shots = agg.shots.filter((q) => q.team === team);
+    if (!shots.length) return '';
+    const by = {};
+    for (const q of shots) { const b = (by[q.cause] ||= { n: 0, xg: 0, goals: 0 }); b.n++; b.xg += q.xg; if (q.result === 'goal') b.goals++; }
+    const rows = Object.entries(by).sort((a, b) => b[1].n - a[1].n).slice(0, 4);
+    return `<div class="how ${team}"><b class="small">${label}: ${shots.length}, xG ${shots.reduce((a, q) => a + q.xg, 0).toFixed(1)}</b>${rows.map(([k, v]) =>
+      `<div class="hrow"><span class="small">${esc(CAUSE_LABEL[k] || k)}</span><span class="hbar"><i style="width:${Math.round((100 * v.n) / shots.length)}%"></i></span><span class="small muted">${v.n}${v.goals ? ` · ${v.goals} ${v.goals === 1 ? 'goal' : 'goals'}` : ''}</span></div>`).join('')}</div>`;
+  };
+  const h = side('home', 'Your shots'), a = side('away', 'Their shots');
+  return h || a ? `<details class="card" open><summary><b>How the shots came</b></summary>${h}${a}</details>` : '';
+}
+function proofHTML() {
+  const p = lab.proof, sit = labSit();
+  if (!p) return '';
+  if (p.busy) return `<div class="card"><h3>Testing changes for you</h3><p class="small">${p.stage === 'screen'
+    ? `Trying each alternative on your 100 passages: ${p.tested} of ${p.total}.`
+    : 'Re-testing the promising ones on 200 more passages, so luck doesn’t pick your tactic.'}</p><div class="progress"><i style="width:${Math.round(100 * p.progress)}%"></i></div></div>`;
+  const fmt = (k, x) => { const v = Math.round(x.d); return `“${METRICS[k].label}” ${v > 0 ? '+' : '−'}${Math.abs(v)} points`; };
+  const found = p.found.slice(0, 3).map((f, i) => {
+    const side = ['shotFor', 'shotAg'].filter((k) => k !== sit.primary.key && f.j.d[k] && Math.abs(f.j.d[k].d) >= 3).map((k) => fmt(k, f.j.d[k]));
+    return `<div class="card good"><h3>${esc(f.c.label)}</h3><p class="small">${esc(fmt(sit.primary.key, f.j.d[sit.primary.key]))} across 300 passages.${side.length ? ` Also: ${esc(side.join(', '))}.` : ' Shots for and against barely moved.'}</p>
+      <div class="fixes"><button class="btn small" data-proof="${i}">Apply and compare</button></div></div>`;
+  }).join('');
+  const tally = `Tested ${p.total} single changes: ${p.found.length} held up over 300 passages, ${p.same} made no clear difference, ${p.worse} made it worse. Expect the real gain to be a little smaller than shown.`;
+  return `${found || `<div class="card"><h3>Nothing clearly better</h3><p class="small">No single change the assistant can make beat your set-up by a margin it could trust. Try moving players by hand, combining changes, or a different opponent.</p></div>`}<p class="small muted">${tally}</p>`;
 }
 function insightsHTML() {
-  if (!lab.insights.length || !lab.result || lab.result.sit !== lab.sit) return '';
-  return `<section><h2>Assistant</h2>${lab.insights.map((q, i) => `<div class="card ${q.tone}"><h3>${esc(q.title)}</h3><p class="small">${esc(q.text)}</p>
-    ${q.fixes.length ? `<div class="fixes">${q.fixes.map((f, j) => `<button class="btn small" data-fix="${i}.${j}">Try: ${esc(f.label)}</button>`).join('')}</div>` : ''}</div>`).join('')}</section>`;
+  if (!lab.result || lab.result.sit !== lab.sit || appMode !== 'lab') return '';
+  const notes = lab.insights.map((q) => `<div class="card ${q.tone}"><h3>${esc(q.title)}</h3><p class="small">${esc(q.text)}</p></div>`).join('');
+  return `<section><h2>Assistant</h2>${proofHTML()}${notes ? `<h3 class="sub">What the numbers say</h3>${notes}` : ''}</section>`;
 }
 
+const GUIDE_KEY = 'tacticsLab.guide.v1';
+let guideSeen = !!store.get(GUIDE_KEY, false);
+function guideHTML() {
+  if (guideSeen) return '';
+  return `<section><div class="card gold guide"><h3>How this works</h3>
+    <ol class="small"><li><b>Pick a moment</b> of a match below. Both teams line up the way their tactics say they would.</li>
+    <li><b>Watch</b> one run, and drag players to change the picture. Plan shows where each role will run and where your press goes.</li>
+    <li><b>Test 100×</b> plays it a hundred times with small differences each time. Then the assistant tests the alternatives for you and only recommends what held up.</li>
+    <li><b>Lessons</b> teach one principle each. <b>Match</b> is a season: scout the next opponent, prepare here, play it.</li></ol>
+    <button class="btn small" id="guide-ok">Got it</button></div></section>`;
+}
 function renderLabSide() {
   const sit = labSit(), src = club, teams = labTeams();
   const has = sit.has === 'home' ? 'You have the ball' : 'They have the ball';
-  return `
+  return `${guideHTML()}
     <section><h2>Situation</h2>
       <label class="sr" for="sit-select">Situation</label>
       <select id="sit-select" class="full">${SITUATIONS.map((q, i) => `<option value="${i}" ${i === lab.sit ? 'selected' : ''}>${esc(q.name)}</option>`).join('')}</select>
@@ -5018,6 +5226,7 @@ const curLesson = () => LESSONS.find((l) => l.id === lesson.id) || null;
 function lessonSrc(L) {
   const tactic = styleTactic(L.style);
   Object.assign(tactic.instr, L.set || {});
+  if (L.roles) for (const i in L.roles) tactic.roles[i] = L.roles[i];
   return { us: { name: 'Blue', tactic, squad: makeSquad(tactic.formation, 'balanced', US_SEED) }, them: opponentTeam(L.opp) };
 }
 function openLesson(id) {
@@ -5082,17 +5291,23 @@ function renderLessonsSide() {
    (a dozen passages a half), with a half-time report and the chance to
    change things before the second half.
    ================================================================ */
-const match = { phase: 'pre', seed: 0, items: [], shown: 0, score: { home: 0, away: 0 }, halves: [null, null], timer: 0, current: -1, minute: 0 };
-function kickOff() {
+const match = { phase: 'pre', seed: 0, items: [], shown: 0, score: { home: 0, away: 0 }, halves: [null, null], timer: 0, current: -1, minute: 0, league: false, oppId: null };
+// League fixtures are played against the real opponent; a friendly uses
+// whatever version of them you set up in Tactics.
+const matchOpp = () => (match.league ? opponentTeam(match.oppId) : club.them);
+const matchTeams = () => ({ home: engTeam(club.us), away: engTeam(matchOpp()) });
+function kickOff(league = false) {
+  match.league = league && !seasonOver();
+  match.oppId = match.league ? nextFixture().opp : club.oppId;
   match.seed = (Math.random() * 1e6) >>> 0;
   match.items = []; match.shown = 0; match.score = { home: 0, away: 0 }; match.halves = [null, null]; match.current = -1; match.minute = 0;
   playHalf(1);
 }
 function playHalf(half) {
-  const teams = teamsOf(club), agg = newAgg(), plan = matchPlan(teams, match.seed, half);
+  const teams = matchTeams(), agg = newAgg(), plan = matchPlan(teams, match.seed, half);
   for (const m of plan) {
     const sit = SITUATIONS[m.sit], t = withForce(teams, sit), setup = engSetup(t, sit);
-    const w = engRun(runInput(t, setup, m.seed));
+    const w = engRun(runInput(t, setup, m.seed, sit.maxT));
     addRun(agg, w);
     match.items.push({ ...m, half, teams: t, setup, sum: summarize(w, sit), goal: w.outcome.kind === 'goal' ? w.outcome.team : null, xg: { home: w.T.home.S.xg, away: w.T.away.S.xg } });
   }
@@ -5107,6 +5322,7 @@ function revealNext() {
     match.phase = match.phase === 'first' ? 'ht' : 'ft';
     ticker(match.phase === 'ht' ? `Half-time: ${match.score.home}–${match.score.away}` : `Full time: ${match.score.home}–${match.score.away}`, match.phase === 'ft' && match.score.home > match.score.away ? 'win' : '', 3000);
     if (match.phase === 'ft' && match.score.home > match.score.away) flash('win');
+    if (match.phase === 'ft' && match.league) recordLeague();
     renderSide(); syncBars();
     return;
   }
@@ -5118,7 +5334,7 @@ function revealNext() {
   }
   ticker(`${it.minute}’ ${it.sum.text}`, it.goal ? 'goal' : it.sum.kind === 'shot' ? 'shot' : '', 1600);
   renderScorebug(); renderSide(); syncBars();
-  match.timer = setTimeout(revealNext, it.goal ? 1500 : 800);
+  match.timer = setTimeout(revealNext, it.goal ? 1500 : it.sum.kind === 'shot' ? 800 : 450);
 }
 function skipReveal() { clearTimeout(match.timer); while (match.shown < match.items.length) { const it = match.items[match.shown++]; if (it.goal) match.score[it.goal]++; match.minute = it.minute; } revealNext(); }
 function watchItem(i) {
@@ -5128,7 +5344,7 @@ function watchItem(i) {
   match.current = i;
   placeSetup(it.teams, it.setup);
   replay.start = saveStart();
-  startReplay(engRun(runInput(it.teams, it.setup, it.seed), true));
+  startReplay(engRun(runInput(it.teams, it.setup, it.seed, SITUATIONS[it.sit].maxT), true));
 }
 function renderScorebug() {
   const el = $('#scorebug');
@@ -5154,14 +5370,122 @@ function matchReport(half) {
   if (!qs.length) return '<p class="muted small">Nothing stood out: the game is even on the patterns that matter.</p>';
   return qs.map((q) => `<div class="card ${q.tone}"><b>${esc(q.title)}</b><p class="small">${esc(q.text)}</p>${q.fixes.length ? `<p class="small muted">Worth trying: ${q.fixes.map((f) => esc(f.label)).join('; ')}.</p>` : ''}</div>`).join('');
 }
+
+/* ================================================================
+   Season: seven fixtures against the league, a scouting report built
+   from simulations before each one, and a table where every other
+   result is played by the same engine.
+   ================================================================ */
+const SEASON_KEY = 'tacticsLab.season.v1';
+const ROUNDS = leagueRounds();
+function freshSeason() { return { seed: (Math.random() * 1e6) >>> 0, results: [], year: 1 }; }
+function loadSeason() {
+  const s = store.get(SEASON_KEY, null);
+  if (!s || !Array.isArray(s.results) || s.results.length > ROUNDS.length) return freshSeason();
+  const ok = (r) => LEAGUE_IDS.includes(r?.a) && LEAGUE_IDS.includes(r?.b) && Number.isInteger(r.ga) && Number.isInteger(r.gb);
+  if (!s.results.every((round) => Array.isArray(round) && round.every(ok))) return freshSeason();
+  return { seed: num(s.seed) >>> 0, results: s.results, year: Math.max(1, Math.round(num(s.year)) || 1) };
+}
+let season = loadSeason();
+const saveSeason = () => store.set(SEASON_KEY, season);
+const seasonOver = () => season.results.length >= ROUNDS.length;
+function nextFixture() {
+  const pair = ROUNDS[season.results.length]?.find((q) => q.includes('us'));
+  return pair ? { opp: pair[0] === 'us' ? pair[1] : pair[0], round: season.results.length + 1 } : null;
+}
+const clubName = (id) => (id === 'us' ? club.us.name : OPPONENTS.find((o) => o.id === id)?.name || id);
+const oppSide = (id) => { const o = opponentTeam(id); return engTeam(o); };
+// After your match: play the round's other fixtures and move on.
+function recordLeague() {
+  const r = season.results.length, pairs = ROUNDS[r], out = [];
+  pairs.forEach(([a, b], k) => {
+    if (a === 'us' || b === 'us') {
+      const usHome = a === 'us';
+      out.push({ a, b, ga: usHome ? match.score.home : match.score.away, gb: usHome ? match.score.away : match.score.home });
+    } else {
+      const m = simMatch({ home: oppSide(a), away: oppSide(b) }, (season.seed * 7 + r * 10 + k) >>> 0);
+      out.push({ a, b, ga: m.g.home, gb: m.g.away });
+    }
+  });
+  season.results.push(out);
+  match.league = false;
+  saveSeason();
+  scout.key = null;
+  const nf = nextFixture();
+  if (nf) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); }
+}
+// Scouting: the situations this fixture will throw up most, and how your
+// current tactic does in each against them compared with an average side.
+const scout = { key: null, busy: false, rows: null };
+async function runScout() {
+  const nf = nextFixture();
+  if (!nf || scout.busy) return;
+  const key = JSON.stringify([nf.opp, club.us.tactic, season.results.length]);
+  if (scout.key === key) return;
+  scout.busy = true; scout.key = key; scout.rows = null; renderSide();
+  const vs = { home: engTeam(club.us), away: oppSide(nf.opp) }, avg = { home: engTeam(club.us), away: oppSide('ashby') };
+  const rows = [];
+  for (const q of scoutPlan(vs)) {
+    await new Promise((res) => setTimeout(res, 0));
+    if (scout.key !== key) return;
+    const sit = SITUATIONS[q.sit], t1 = withForce(vs, sit), t0 = withForce(avg, sit);
+    const m1 = metricsOf(engBatch(t1, engSetup(t1, sit), 60, TEST_SEED, 0, undefined, sit.maxT))[sit.primary.key];
+    const m0 = metricsOf(engBatch(t0, engSetup(t0, sit), 60, TEST_SEED, 0, undefined, sit.maxT))[sit.primary.key];
+    const good = (m1 - m0) * (sit.primary.good === 'up' ? 1 : -1);
+    rows.push({ ...q, m1, m0, good });
+    scout.rows = rows; renderSide();
+  }
+  scout.busy = false;
+  renderSide();
+}
+function prepareFor(sitIdx) {
+  const nf = nextFixture();
+  if (nf && club.oppId !== nf.opp) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); }
+  labSitSaved = sitIdx; lab.saved = null;
+  setMode('lab');
+  toast(`Preparing for ${clubName(nf?.opp || club.oppId)}: ${SITUATIONS[sitIdx].name}`);
+}
+function tableHTML(compact = false) {
+  const t = leagueTable(season.results);
+  return `<table class="ltable"><thead><tr><th></th><th class="l">Club</th><th>P</th>${compact ? '' : '<th>W</th><th>D</th><th>L</th>'}<th>GD</th><th>Pts</th></tr></thead><tbody>${t.map((r, i) =>
+    `<tr class="${r.id === 'us' ? 'us' : ''}"><td>${i + 1}</td><td class="l">${esc(clubName(r.id))}</td><td>${r.p}</td>${compact ? '' : `<td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>`}<td>${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td><td><b>${r.pts}</b></td></tr>`).join('')}</tbody></table>`;
+}
+function roundHTML(i) {
+  const round = season.results[i];
+  if (!round) return '';
+  return `<div class="results">${round.map((r) => `<div class="${r.a === 'us' || r.b === 'us' ? 'us' : ''}"><span>${esc(clubName(r.a))}</span><b>${r.ga}–${r.gb}</b><span>${esc(clubName(r.b))}</span></div>`).join('')}</div>`;
+}
+function scoutHTML(nf) {
+  const o = OPPONENTS.find((q) => q.id === nf.opp), st = STYLES[o.style], ins = opponentTeam(nf.opp).tactic.instr;
+  const says = [`${INSTR.engage.label.toLowerCase()} ${INSTR.engage.opts.find((x) => x[0] === ins.engage)[1].toLowerCase()}`, `${INSTR.passing.label.toLowerCase()} ${INSTR.passing.opts.find((x) => x[0] === ins.passing)[1].toLowerCase()}`, `${INSTR.line.label.toLowerCase()} ${INSTR.line.opts.find((x) => x[0] === ins.line)[1].toLowerCase()}`];
+  const rows = scout.rows || [];
+  const worst = rows.length === 4 && !scout.busy ? rows.reduce((a, b) => (b.good < a.good ? b : a)) : null;
+  const best = rows.length === 4 && !scout.busy ? rows.reduce((a, b) => (b.good > a.good ? b : a)) : null;
+  const line = (r) => {
+    const sit = SITUATIONS[r.sit], d = Math.round(r.good);
+    const tag = r === worst && d < -8 ? '<span class="tag bad">Their threat</span>' : r === best && d > 8 ? '<span class="tag good">Your chance</span>' : '';
+    return `<div class="srow"><div class="grow"><b>${esc(sit.name)}</b> ${tag}<p class="small muted">${Math.round(r.share * 100)}% of the passages. ${esc(sit.primary.label)}: ${Math.round(r.m1)}% against them, ${Math.round(r.m0)}% against an average side.</p></div><button class="btn small" data-prepare="${r.sit}">Prepare</button></div>`;
+  };
+  return `<div class="card red"><h3>Scouting: ${esc(o.name)}</h3><p class="small">${esc(o.blurb)} ${esc(st.name)}: ${esc(says.join(', '))}.</p>
+    ${rows.map(line).join('')}${scout.busy ? `<p class="small muted">Simulating your tactic against them… ${rows.length} of 4 situations.</p>` : ''}
+    ${worst && Math.round(worst.good) < -8 ? `<p class="small"><b>Advice:</b> fix “${esc(SITUATIONS[worst.sit].name)}” first. Prepare opens it in the Lab against them, and the assistant will test changes for you.</p>` : ''}</div>`;
+}
 function renderMatchSide() {
-  const us = club.us, them = club.them;
+  const us = club.us, them = matchOpp();
   if (match.phase === 'pre') {
-    return `<section><h2>Matchday</h2><p class="muted small">No full ninety minutes: the game is played as its key moments, eighteen passages each half, picked by how the two styles meet. Goals are goals the simulation scores.</p></section>
-      <section><div class="card blue"><div class="row"><b class="grow">${esc(teamLine(teamsOf(club).home))}</b><button class="link" data-goto="tactics">Change</button></div></div>
-      <div class="card red"><label class="irow"><span>Opponent</span><select class="full" id="opp-select">${OPPONENTS.map((o) => `<option value="${o.id}" ${o.id === club.oppId ? 'selected' : ''}>${esc(o.name)} (${esc(STYLES[o.style].name)})</option>`).join('')}</select></label>
-      <p class="muted small">${esc(OPPONENTS.find((o) => o.id === club.oppId)?.blurb || '')}</p></div></section>
-      <section><button class="btn primary" id="match-kick">Kick off</button></section>`;
+    const nf = nextFixture();
+    if (nf) setTimeout(runScout, 0);
+    const last = season.results.length ? `<section><h2>Round ${season.results.length} results</h2>${roundHTML(season.results.length - 1)}</section>` : '';
+    const league = nf
+      ? `<section><h2>Season ${season.year} · Round ${nf.round} of ${ROUNDS.length}</h2><div class="card blue"><div class="row"><b class="grow">${esc(us.name)} v ${esc(clubName(nf.opp))}</b><button class="link" data-goto="tactics">Tactics</button></div>
+          <p class="small muted">${esc(teamLine(engTeam(us)))}</p></div>${scoutHTML(nf)}<button class="btn primary" id="match-kick">Kick off</button></section>`
+      : `<section><h2>Season ${season.year} complete</h2>${(() => { const pos = leagueTable(season.results).findIndex((r) => r.id === 'us') + 1; return `<div class="card ${pos <= 3 ? 'good' : pos >= 6 ? 'bad' : ''}"><h3>${pos === 1 ? 'Champions!' : `You finished ${pos}${['st', 'nd', 'rd'][pos - 1] || 'th'}`}</h3><p class="small">${pos === 1 ? 'Top of the league on tactics alone: every side had the same kind of players you did or better.' : 'Every result was played by the engine, so the table reflects how your ideas held up against each style. Go again with what you learned.'}</p></div>`; })()}
+          <button class="btn primary" id="season-new">Start season ${season.year + 1}</button></section>`;
+    return `${league}${last}<section><h2>Table</h2>${tableHTML()}</section>
+      <section><details class="card"><summary><b>Friendly</b> <span class="muted small">any opponent, doesn’t count</span></summary>
+        <label class="irow"><span>Opponent</span><select class="full" id="opp-select">${OPPONENTS.map((o) => `<option value="${o.id}" ${o.id === club.oppId ? 'selected' : ''}>${esc(o.name)} (${esc(STYLES[o.style].name)})</option>`).join('')}</select></label>
+        <p class="muted small">${esc(OPPONENTS.find((o) => o.id === club.oppId)?.blurb || '')} A friendly uses them as you set them up in Tactics.</p><button class="btn" id="match-friendly">Play friendly</button></details></section>
+      <p class="muted small">Matches are played as their key moments, ${MOMENTS_PER_HALF} passages a half, chosen by how the two styles meet. Every goal is one the simulation scored.</p>`;
   }
   const feed = match.items.slice(0, match.shown).map((it, i) => ({ it, i })).reverse().map(({ it, i }) =>
     `<div class="it ${it.goal ? 'goal' : ''}" ${match.current === i ? 'aria-current="true"' : ''}><span class="m">${it.minute}’</span><span class="txt">${esc(it.sum.text)}<span class="sit">${esc(SITUATIONS[it.sit].name)}</span></span><button class="btn small" data-watch-item="${i}">Watch</button></div>`).join('');
@@ -5170,7 +5494,7 @@ function renderMatchSide() {
     <section><div class="scoreboard"><span class="tm">${esc(us.name)}</span><span class="sc">${match.score.home}–${match.score.away}</span><span class="tm r">${esc(them.name)}</span></div>
       <p class="muted small">${ft ? 'Full time' : ht ? 'Half-time' : `${match.minute}’`}</p></section>
     ${ht ? `<section><h2>Half-time report</h2>${matchStats('ht')}${matchReport(1)}<div class="row"><button class="btn" data-goto="tactics">Change tactics</button><button class="btn primary" id="match-second">Second half</button></div></section>` : ''}
-    ${ft ? `<section><h2>Full time</h2>${matchStats('ft')}${matchReport(2)}<button class="btn primary" id="match-again">New match</button></section>` : ''}
+    ${ft ? `<section><h2>Full time</h2>${matchStats('ft')}${matchReport(2)}<button class="btn primary" id="match-again">${season.results.length && !match.league ? 'Back to the league' : 'Done'}</button></section>` : ''}
     <section><h2>Moments</h2><div class="feed">${feed || '<p class="muted small">Kick-off…</p>'}</div></section>
     ${replay.w ? `<section><h2>Key moments in this passage</h2>${momentsHTML()}</section>` : ''}`;
 }
@@ -5202,7 +5526,7 @@ function syncBars() {
   $('#lab-plan').setAttribute('aria-pressed', String(lab.showPlan));
   for (const b of document.querySelectorAll('[data-phase]')) b.setAttribute('aria-pressed', String(b.dataset.phase === tac.phase));
   const go = $('#match-go'), skip = $('#match-skip');
-  go.textContent = { pre: 'Kick off', first: 'Playing…', ht: 'Second half', second: 'Playing…', ft: 'New match' }[match.phase];
+  go.textContent = { pre: seasonOver() ? 'Friendly' : 'Kick off', first: 'Playing…', ht: 'Second half', second: 'Playing…', ft: 'Done' }[match.phase];
   go.disabled = match.phase === 'first' || match.phase === 'second';
   skip.hidden = !(match.phase === 'first' || match.phase === 'second');
   renderScorebug();
@@ -5219,7 +5543,7 @@ $('#side').addEventListener('click', (ev) => {
     if (appMode === 'tactics') showShape(); else refreshSituation(team);
     renderSide();
   } else if (d.moment != null) focusMoment(replay.key[+d.moment]);
-  else if (d.fix) { const [i, j] = d.fix.split('.').map(Number); tryFix(lab.insights[i].fixes[j]); }
+  else if (d.proof != null && lab.proof?.found[+d.proof]) tryFix(lab.proof.found[+d.proof].c);
   else if (b.id === 'lab-pin') { lab.pinned = lab.result; renderSide(); }
   else if (b.id === 'lab-coach') askCoach();
   else if (d.goto) setMode(d.goto);
@@ -5239,7 +5563,11 @@ $('#side').addEventListener('click', (ev) => {
   else if (d.lesson) { openLesson(d.lesson); }
   else if (b.id === 'lesson-back') closeLesson();
   else if (b.id === 'lesson-hint') { lesson.hint++; renderSide(); }
-  else if (b.id === 'match-kick') { kickOff(); }
+  else if (b.id === 'guide-ok') { guideSeen = true; store.set(GUIDE_KEY, true); renderSide(); }
+  else if (b.id === 'match-kick') { kickOff(true); }
+  else if (b.id === 'match-friendly') { kickOff(false); }
+  else if (b.id === 'season-new') { season = { ...freshSeason(), year: season.year + 1 }; saveSeason(); const nf = nextFixture(); club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); scout.key = null; renderSide(); }
+  else if (d.prepare != null) prepareFor(+d.prepare);
   else if (b.id === 'match-second') { playHalf(2); }
   else if (b.id === 'match-again') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); }
   else if (d.watchItem != null) watchItem(+d.watchItem);
@@ -5282,7 +5610,7 @@ $('#lab-speed').addEventListener('click', () => { replay.speed = replay.speed ==
 $('#lab-space').addEventListener('click', () => { lab.showSpace = !lab.showSpace; syncBars(); requestRender(); });
 $('#lab-plan').addEventListener('click', () => { lab.showPlan = !lab.showPlan; syncBars(); requestRender(); });
 for (const b of document.querySelectorAll('[data-phase]')) b.addEventListener('click', () => { tac.phase = b.dataset.phase; showShape(); renderSide(); syncBars(); });
-$('#match-go').addEventListener('click', () => { if (match.phase === 'pre') kickOff(); else if (match.phase === 'ht') playHalf(2); else if (match.phase === 'ft') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); } });
+$('#match-go').addEventListener('click', () => { if (match.phase === 'pre') kickOff(!seasonOver()); else if (match.phase === 'ht') playHalf(2); else if (match.phase === 'ft') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); } });
 $('#match-skip').addEventListener('click', skipReveal);
 
 /* ================================================================

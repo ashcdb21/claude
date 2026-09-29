@@ -1,262 +1,308 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Tactics Lab</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --grass: #2f7a3f;
-      --line: rgba(255, 255, 255, 0.9);
-      --goal: rgba(255, 255, 255, 0.95);
-      --home: #2563eb;
-      --away: #e11d48;
-      --select: #fbbf24;
-      --offside: #fde047;
-      --blocked: #fb7185;
-      --badge: #fde68a;
-      --homeRun: #bfdbfe;
-      --awayRun: #fecdd3;
-      --surround: #16241d;
-      --flood: #3d5a4a;
-      --panel: rgba(248, 250, 252, 0.86);
-      --panel-solid: #f8fafc;
-      --text: #0f172a;
-      --muted: #5b6b80;
-      --border: rgba(15, 23, 42, 0.14);
-      --accent: #2563eb;
-      --chip: rgba(15, 23, 42, 0.06);
-      --toolbar: rgba(15, 23, 42, 0.78);
-      --panel-w: 340px;
-      --font-cond: 'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif-condensed, system-ui, sans-serif;
-      --font-body: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-      color-scheme: light;
-    }
-    /* Dark tokens: under the OS preference unless light is forced, and under an explicit data-theme. */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --surround: #070d0a; --flood: #1f3a2c;
-        --panel: rgba(15, 23, 32, 0.78); --panel-solid: #0f1720; --text: #e5edf5; --muted: #8fa1b5;
-        --border: rgba(255, 255, 255, 0.12); --accent: #60a5fa; --chip: rgba(255, 255, 255, 0.08);
-        --toolbar: rgba(8, 12, 18, 0.82); color-scheme: dark;
-      }
-    }
-    :root[data-theme="dark"] {
-      --surround: #070d0a; --flood: #1f3a2c;
-      --panel: rgba(15, 23, 32, 0.78); --panel-solid: #0f1720; --text: #e5edf5; --muted: #8fa1b5;
-      --border: rgba(255, 255, 255, 0.12); --accent: #60a5fa; --chip: rgba(255, 255, 255, 0.08);
-      --toolbar: rgba(8, 12, 18, 0.82); color-scheme: dark;
-    }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: var(--surround); overflow: hidden; font: 15px/1.4 var(--font-body); color: var(--text); }
-    button, select, input, textarea { font: inherit; color: inherit; }
-    button { cursor: pointer; }
-    #app { position: fixed; inset: 0; display: flex; }
-    #stage { position: relative; flex: 1; min-width: 0; }
-    /* The board keeps clear of system bars and of the toolbar underneath it. */
-    #board { position: absolute; top: env(safe-area-inset-top); left: env(safe-area-inset-left); right: env(safe-area-inset-right);
-      bottom: calc(env(safe-area-inset-bottom) + 60px); }
-    #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
-    #toolbar { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 8px); transform: translateX(-50%);
-      display: flex; gap: 2px; padding: 4px; background: var(--toolbar); border-radius: 12px; color: #fff; max-width: calc(100% - 16px); }
-    #toolbar { -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
-    #toolbar button { background: transparent; border: 0; padding: 8px 12px; border-radius: 8px; font: 600 16px var(--font-cond);
-      letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
-    #toolbar button[aria-pressed="true"] { background: rgba(255,255,255,0.22); }
-    @media (max-width: 480px) {
-      #toolbar button { padding: 8px 9px; font-size: 15px; letter-spacing: .02em; }
-      #toolbar .wide { display: none; }
-    }
-    #toolbar button:disabled { opacity: .35; cursor: default; }
-    #lockin { background: var(--accent) !important; }
-    #toolbar .sep { width: 1px; background: rgba(255,255,255,0.25); margin: 6px 2px; }
-    #toast { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translateX(-50%);
-      padding: 8px 14px; border-radius: 8px; background: rgba(15,23,42,0.85); color: #fff; font-weight: 600;
-      opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 24px); text-align: center; }
-    #toast.show { opacity: 1; }
-    #toast.good { background: rgba(21,128,61,0.92); }
-    #toast.bad { background: rgba(185,28,28,0.92); }
-    #hud { position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 10px); transform: translateX(-50%); z-index: 2;
-      padding: 8px 14px; border-radius: 12px; background: rgba(8,12,18,0.82); color: #fff; text-align: center;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); max-width: calc(100% - 16px); }
-    .hud-top { display: flex; gap: 10px; justify-content: center; font: 600 13px var(--font-body); color: #cbd5e1; flex-wrap: wrap; }
-    .hud-top b { font: 700 16px var(--font-cond); letter-spacing: .06em; color: #fff; text-transform: uppercase; }
-    .hud-line { font: 700 19px var(--font-cond); letter-spacing: .03em; margin-top: 2px; }
-    .hud-line .bad { color: #fb7185; } .hud-line .good { color: #4ade80; }
-    .hud-tip { font-size: 12px; color: #94a3b8; }
-    .pulse { animation: pulse 1s ease-in-out infinite alternate; }
-    @keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
-    #stage.in-match #toast { top: auto; bottom: calc(env(safe-area-inset-bottom) + 68px); }
-    @media (max-width: 600px) {
-      #hud { padding: 6px 12px; } .hud-top { font-size: 12px; } .hud-top b { font-size: 14px; } .hud-line { font-size: 17px; }
-      .hud-tip { display: none; }
-    }
-    #result, #welcome { position: absolute; inset: 0; display: grid; place-items: center; z-index: 4; padding: 16px; }
-    #result[hidden], #welcome[hidden] { display: none; }
-    #welcome { background: rgba(4,8,6,0.55); }
-    #result .card, #welcome .card { width: min(440px, 100%); max-height: 100%; overflow-y: auto; padding: 22px; border-radius: 18px;
-      background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 1px solid var(--border);
-      -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); animation: pop .35s cubic-bezier(.2,1.4,.4,1); }
-    #result .card.won { border-top: 5px solid #22c55e; } #result .card.lost { border-top: 5px solid var(--away); }
-    .card .big { font: 700 40px/1 var(--font-cond); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 8px; }
-    .card .big span { color: var(--accent); }
-    .card .rec { color: var(--muted); font-weight: 600; }
-    .card .row { justify-content: flex-start; }
-    .card ul { padding-left: 18px; color: var(--muted); font-size: 13px; }
-    .btn.huge { display: block; width: 100%; margin: 8px 0; padding: 12px; font: 700 20px var(--font-cond); letter-spacing: .04em; text-transform: uppercase; }
-    @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
-    #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 3; }
-    #flash.goal { background: radial-gradient(circle, rgba(225,29,72,0.0) 30%, rgba(225,29,72,0.55)); animation: flash .9s ease-out; }
-    #flash.win { background: radial-gradient(circle, rgba(34,197,94,0.0) 30%, rgba(34,197,94,0.45)); animation: flash .9s ease-out; }
-    @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { #result .card, #welcome .card, .pulse, #flash { animation: none !important; } }
+<title>Tactics Lab</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Layout: a full-bleed floodlit pitch is the whole screen; a slim scoreboard bar on top,
+     one thumb-reach action bar at the bottom, and the tactics drawer only in Board mode.
+     One visual world (a night match), so a single dark palette on purpose. */
+  :root {
+    --night: #0a1511;          /* stand shadow around the pitch */
+    --surface: #111f1a;        /* scoreboard, drawer, cards */
+    --surface-2: #1a2c25;      /* raised controls */
+    --line-soft: rgba(226, 240, 232, 0.12);
+    --chalk: #eef5f0;          /* primary text: touchline chalk */
+    --muted: #93a89e;
+    --armband: #f5b83d;        /* accent: captain's armband */
+    --armband-ink: #1c1405;
+    --good: #4ade80;
+    --bad: #fb7185;
+    /* canvas tokens (read by the renderer) */
+    --surround: #0a1511;
+    --flood: #1d3a2c;
+    --grass: #2f7a3f;
+    --line: rgba(255, 255, 255, 0.9);
+    --goal: rgba(255, 255, 255, 0.95);
+    --home: #2f6fed;
+    --away: #e2334f;
+    --select: #f5b83d;
+    --offside: #fde047;
+    --blocked: #fb7185;
+    --badge: #f5b83d;
+    --homeRun: #bfd4ff;
+    --awayRun: #ffc9d2;
+    --display: 'Big Shoulders Display', 'Oswald', 'Arial Narrow', sans-serif-condensed, Impact, sans-serif;
+    --body: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --r: 10px;
+    --drawer-w: 340px;
+    --bar-h: 52px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--night); color: var(--chalk); font: 15px/1.45 var(--body); }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--armband); outline-offset: 2px; }
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
 
-    /* Panel: a bottom sheet by default, a right-hand column on wide landscape screens. */
-    #panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 78dvh; overflow-y: auto; overscroll-behavior: contain;
-      background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,0.35);
-      -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
-      padding: 0 16px calc(16px + env(safe-area-inset-bottom)); transform: translateY(105%); transition: transform .25s; z-index: 5;
-      padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
-    #panel.open { transform: none; }
-    #panel header { position: sticky; top: 0; background: transparent; display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 0 8px; z-index: 1; }
-    #panel h1 { font: 700 24px/1 var(--font-cond); letter-spacing: .02em; text-transform: uppercase; margin: 0; }
-    #panel h1 span { color: var(--accent); }
-    #panel h2 { font: 600 14px var(--font-cond); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 0 8px; }
-    #panel section { padding: 12px 0; border-top: 1px solid var(--border); }
-    #panel-close, #theme { background: var(--chip); border: 0; border-radius: 8px; padding: 4px 10px; }
-    #panel header div { display: flex; gap: 6px; }
-    @media (min-width: 900px) and (orientation: landscape) {
-      #panel { position: absolute; top: 12px; right: 12px; bottom: 12px; left: auto; transform: none; width: var(--panel-w); max-height: none;
-        border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); border: 1px solid var(--border); padding: 0 16px 16px; }
-      #stage { margin-right: calc(var(--panel-w) + 12px); }
-      #panel-close, #panel-open { display: none; }
-    }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-    .row > label { display: flex; gap: 6px; align-items: center; }
-    .grow { flex: 1; min-width: 0; }
-    .btn { background: var(--chip); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    select, input[type=text], textarea { background: var(--panel-solid); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
-    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-    .seg button { background: transparent; border: 0; padding: 6px 10px; }
-    .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-    dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
-    dl.stats dt { color: var(--muted); }
-    dl.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-    .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 4px 0 8px; }
-    .bar i { display: block; }
-    .muted { color: var(--muted); }
-    ul.plain { list-style: none; padding: 0; margin: 0; }
-    ul.plain li { display: flex; gap: 6px; align-items: center; padding: 4px 0; }
-    kbd { display: inline-block; min-width: 1.6em; text-align: center; padding: 1px 5px; border: 1px solid var(--border);
-      border-bottom-width: 2px; border-radius: 5px; font: 12px ui-monospace, monospace; }
-  </style>
-</head>
-<body>
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+
+  /* ---------- Top bar: wordmark, mode switch, record ---------- */
+  #topbar { display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 8px;
+    background: var(--surface); border-bottom: 1px solid var(--line-soft); z-index: 6; }
+  .wordmark { font: 900 22px/1 var(--display); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+  .wordmark span { color: var(--armband); }
+  .modes { display: inline-flex; background: var(--night); border-radius: 999px; padding: 3px; margin-inline: auto; }
+  .modes button { border: 0; background: transparent; padding: 6px 16px; border-radius: 999px; font: 800 15px var(--display);
+    letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .modes button[aria-pressed="true"] { background: var(--armband); color: var(--armband-ink); }
+  .chip { font: 600 13px var(--body); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chip b { color: var(--chalk); }
+  .iconbtn { border: 1px solid var(--line-soft); background: var(--surface-2); border-radius: 8px; padding: 6px 10px; font-weight: 600; }
+  @media (max-width: 520px) { #topbar { gap: 8px; } .wordmark { font-size: 18px; } .modes button { padding: 6px 12px; } .chip { display: none; } }
+
+  /* ---------- Stage ---------- */
+  #main { position: relative; display: flex; min-height: 0; }
+  #stage { position: relative; flex: 1; min-width: 0; }
+  #board { position: absolute; top: 0; left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); }
+  #pitch { display: block; width: 100%; height: 100%; touch-action: none; }
+  /* In a match the scoreboard gets its own strip, so no lane runs underneath it. */
+  #stage.in-match #board { top: 64px; }
+
+  /* Bottom bars (one per mode) */
+  .bar { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); transform: translateX(-50%);
+    display: flex; gap: 6px; align-items: center; padding: 6px; background: var(--surface); border: 1px solid var(--line-soft);
+    border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.45); max-width: calc(100% - 24px); z-index: 3; }
+  .bar button { border: 0; background: transparent; padding: 10px 14px; border-radius: 10px; font: 800 17px/1 var(--display);
+    letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; color: var(--chalk); }
+  .bar button[aria-pressed="true"] { background: var(--surface-2); color: var(--armband); }
+  .bar .sep { width: 1px; align-self: stretch; background: var(--line-soft); margin: 4px 2px; }
+  .bar .go { background: var(--armband); color: var(--armband-ink); padding: 12px 28px; font-size: 22px; }
+  .bar .go:disabled { opacity: .45; cursor: default; }
+  .bar .ghost { color: var(--muted); }
+  @media (max-width: 480px) { .bar { gap: 2px; padding: 5px; } .bar button { padding: 10px 8px; font-size: 16px; } .bar .go { padding: 12px 20px; } .bar .wide { display: none; }
+    .tabs button { font-size: 14px; letter-spacing: .04em; } }
+
+  /* ---------- Match HUD: a scoreboard strip ---------- */
+  #hud { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 3; display: flex; align-items: stretch;
+    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45); max-width: calc(100% - 24px); }
+  #hud .cell { padding: 6px 14px; display: grid; align-content: center; gap: 2px; border-right: 1px solid var(--line-soft); }
+  #hud .cell:last-child { border-right: 0; }
+  #hud .k { font: 600 11px var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  #hud .v { font: 800 20px/1 var(--display); letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+  #hud .bad { color: var(--bad); } #hud .good { color: var(--good); }
+  .pips { display: flex; gap: 4px; }
+  .pips i { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line-soft); }
+  .pips i.done { background: var(--muted); } .pips i.now { background: var(--armband); border-color: var(--armband); }
+  .pulse { animation: pulse 1s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
+  @media (max-width: 520px) { #hud .cell { padding: 5px 10px; } #hud .v { font-size: 17px; } #hud .obj { display: none; } }
+
+  /* Coach bubble for the first level */
+  #coach { position: absolute; left: 50%; top: 76px; transform: translateX(-50%); z-index: 3; width: min(420px, calc(100% - 24px));
+    background: var(--armband); color: var(--armband-ink); border-radius: 12px; padding: 8px 12px; font-weight: 600; font-size: 14px; line-height: 1.35;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4); display: flex; gap: 10px; align-items: start; }
+  @media (max-width: 600px) { #coach { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); } }
+  #coach button { margin-left: auto; border: 0; background: rgba(0,0,0,.12); border-radius: 8px; padding: 4px 10px; font-weight: 700; }
+
+  #toast { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 90px); transform: translateX(-50%);
+    padding: 10px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line-soft); font-weight: 600;
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 24px); text-align: center; z-index: 5; }
+  #toast.show { opacity: 1; }
+  #toast.good { border-color: var(--good); color: var(--good); }
+  #toast.bad { border-color: var(--bad); color: var(--bad); }
+
+  #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 4; }
+  #flash.goal { background: radial-gradient(circle, transparent 35%, rgba(226,51,79,.55)); animation: flash .9s ease-out; }
+  #flash.win { background: radial-gradient(circle, transparent 35%, rgba(74,222,128,.4)); animation: flash .9s ease-out; }
+  @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ---------- Overlays: level map and result ---------- */
+  .overlay { position: absolute; inset: 0; z-index: 4; overflow-y: auto; padding: 24px 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+    background: rgba(10,21,17,.93); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  .sheet { width: min(760px, 100%); margin-inline: auto; display: grid; gap: 16px; }
+  .eyebrow { font: 600 12px var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--armband); }
+  .headline { font: 900 clamp(34px, 7vw, 56px)/.95 var(--display); text-transform: uppercase; letter-spacing: .01em; }
+  .lede { color: var(--muted); max-width: 60ch; margin: 0; }
+  .difficulty { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  .seg button { border: 0; background: transparent; padding: 7px 12px; color: var(--muted); font-weight: 600; }
+  .seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--armband); }
+  .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .level.custom { grid-column: 1 / -1; }
+  .level { position: relative; text-align: left; border: 1px solid var(--line-soft); background: var(--surface); border-radius: var(--r);
+    padding: 14px 16px 16px; display: grid; gap: 6px; align-content: start; min-height: 150px; transition: transform .15s, border-color .15s; }
+  .level:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--armband); }
+  .level:disabled { cursor: default; opacity: .5; }
+  .level .n { font: 900 44px/1 var(--display); color: var(--armband); }
+  .level .name { font: 800 22px/1.05 var(--display); text-transform: uppercase; letter-spacing: .02em; }
+  .level .brief { color: var(--muted); font-size: 14px; }
+  .level .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .stars { color: var(--armband); letter-spacing: .1em; font-size: 16px; }
+  .stars .off { color: var(--surface-2); }
+  .level .lock { position: absolute; right: 14px; top: 14px; font-size: 13px; color: var(--muted); }
+  .custom { border-style: dashed; }
+  .custom textarea { width: 100%; resize: vertical; min-height: 56px; background: var(--night); border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px; }
+
+  .card { width: min(440px, 100%); margin: 10vh auto 0; padding: 22px; border-radius: 16px; background: var(--surface);
+    border: 1px solid var(--line-soft); box-shadow: 0 20px 60px rgba(0,0,0,.55); display: grid; gap: 10px; animation: pop .35s cubic-bezier(.2,1.4,.4,1); }
+  .card.won { border-top: 6px solid var(--good); } .card.lost { border-top: 6px solid var(--away); }
+  .card .big { font: 900 44px/.95 var(--display); text-transform: uppercase; }
+  .card .stars { font-size: 34px; }
+  .card p { margin: 0; }
+  .card .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .debrief { color: var(--muted); font-size: 14px; display: grid; gap: 8px; }
+  @keyframes pop { from { transform: scale(.88); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .btn { border: 1px solid var(--line-soft); background: var(--surface-2); border-radius: 10px; padding: 9px 14px; font-weight: 600; }
+  .btn.primary { background: var(--armband); border-color: var(--armband); color: var(--armband-ink); font: 800 18px/1 var(--display);
+    letter-spacing: .06em; text-transform: uppercase; padding: 11px 18px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  /* ---------- Board drawer ---------- */
+  #panel { width: var(--drawer-w); flex: none; background: var(--surface); border-left: 1px solid var(--line-soft);
+    display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-height: 0; z-index: 5; }
+  #panel[hidden] { display: none !important; }
+  .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line-soft); }
+  .tabs button { flex: 1 1 0; min-width: 0; border: 0; background: transparent; padding: 8px 2px 10px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font: 800 15px var(--display);
+    letter-spacing: .08em; text-transform: uppercase; border-bottom: 3px solid transparent; }
+  .tabs button[aria-selected="true"] { color: var(--chalk); border-bottom-color: var(--armband); }
+  .tabpanes { overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); }
+  .pane { display: grid; gap: 14px; }
+  .pane h3 { font: 600 12px var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .group { display: grid; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > label { display: flex; gap: 6px; align-items: center; }
+  .grow { flex: 1; min-width: 0; }
+  select, input[type=text], textarea { background: var(--night); border: 1px solid var(--line-soft); border-radius: 8px; padding: 7px 9px; }
+  .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+  dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+  dl.stats dt { color: var(--muted); }
+  dl.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .bar-split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
+  .bar-split i { display: block; }
+  .muted { color: var(--muted); }
+  ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  ul.plain li { display: flex; gap: 6px; align-items: center; }
+  kbd { display: inline-block; min-width: 1.7em; text-align: center; padding: 1px 5px; border: 1px solid var(--line-soft);
+    border-bottom-width: 2px; border-radius: 5px; font: 12px ui-monospace, monospace; }
+  /* Narrow screens: the drawer becomes a bottom sheet over the pitch. */
+  @media (max-width: 899px), (orientation: portrait) {
+    #panel { position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-height: 72%; border-left: 0; border-top: 1px solid var(--line-soft);
+      border-radius: 16px 16px 0 0; box-shadow: 0 -12px 40px rgba(0,0,0,.5); }
+  }
+  @media (prefers-reduced-motion: reduce) { .card, .pulse, #flash, .level { animation: none !important; transition: none !important; } }
+</style>
+
 <div id="app">
-  <main id="stage">
-    <div id="board"><canvas id="pitch" aria-label="Tactics board"></canvas></div>
-    <div id="toolbar" role="toolbar" aria-label="Tools">
-      <button data-tool="move" aria-pressed="true" title="Move (V)">Move</button>
-      <button data-tool="runs" aria-pressed="false" title="Runs (R)">Runs</button>
-      <button data-tool="pass" aria-pressed="false" title="Pass (P)">Pass</button>
-      <span class="sep"></span>
-      <button id="play" title="Play (Space)">▶<span class="wide"> Play</span></button>
-      <button id="lockin" hidden>Lock in</button>
-      <button id="view-btn" title="Change view (L)">👁<span class="wide"> Passing</span></button>
-      <button id="match-quick" title="Defend a match">🛡<span class="wide"> Match</span></button>
-      <button id="panel-open" aria-controls="panel" aria-expanded="false" aria-label="Panel">☰<span class="wide"> Panel</span></button>
+  <header id="topbar">
+    <div class="wordmark">Tactics <span>Lab</span></div>
+    <div class="modes" role="tablist" aria-label="Mode">
+      <button id="mode-play" aria-pressed="true">Play</button>
+      <button id="mode-board" aria-pressed="false">Board</button>
     </div>
-    <div id="toast" role="status" aria-live="polite"></div>
-    <div id="hud" hidden aria-live="polite"></div>
-    <div id="result" hidden></div>
-    <div id="flash"></div>
-    <div id="welcome" hidden>
-      <div class="card">
-        <div class="big">Tactics <span>Lab</span></div>
-        <p>A real-size pitch for trying ideas, and a defending game against an opponent that reads your shape.</p>
-        <button class="btn primary huge" id="w-match">🛡 Defend a match</button>
-        <button class="btn huge" id="w-board">✏️ Explore the board</button>
-        <ul>
-          <li><b>Drag</b> players and the ball. <b>Runs</b> (R): drag from a player, bend with the middle handle.</li>
-          <li><b>Pass</b> (P): drag from the ball to a teammate. <b>Space</b> plays it.</li>
-          <li><b>👁 View</b> (L) switches what the board shows: passing, space, zones, shape.</li>
-        </ul>
+    <span class="chip" id="record-chip"></span>
+    <button class="iconbtn" id="panel-open" aria-controls="panel" aria-expanded="false" hidden>Panel</button>
+  </header>
+  <div id="main">
+    <main id="stage">
+      <div id="board"><canvas id="pitch" aria-label="Tactics board"></canvas></div>
+      <div id="hud" hidden aria-live="polite"></div>
+      <div id="coach" hidden></div>
+      <section id="levels" class="overlay" hidden></section>
+      <section id="result" class="overlay" hidden></section>
+      <div id="flash"></div>
+      <div id="toast" role="status" aria-live="polite"></div>
+      <nav id="playbar" class="bar" hidden aria-label="Match controls">
+        <button class="ghost" id="reset-phase" title="Put your players back where this phase started">Reset</button>
+        <button class="go" id="lockin" title="Lock in (Space)">Lock in</button>
+        <button class="ghost" id="quit-match">Quit</button>
+      </nav>
+      <nav id="toolbar" class="bar" role="toolbar" aria-label="Board tools" hidden>
+        <button data-tool="move" aria-pressed="true" title="Move (V)">Move</button>
+        <button data-tool="runs" aria-pressed="false" title="Runs (R)">Runs</button>
+        <button data-tool="pass" aria-pressed="false" title="Pass (P)">Pass</button>
+        <span class="sep"></span>
+        <button id="play" title="Play (Space)">▶<span class="wide"> Play</span></button>
+        <button id="view-btn" title="Change view (L)">View<span class="wide">: Passing</span></button>
+      </nav>
+    </main>
+    <aside id="panel" aria-label="Board panel" hidden>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="stats" aria-selected="true">Stats</button>
+        <button role="tab" data-tab="setup" aria-selected="false">Setup</button>
+        <button role="tab" data-tab="scen" aria-selected="false">Scenarios</button>
+        <button role="tab" data-tab="saved" aria-selected="false">Saved</button>
       </div>
-    </div>
-  </main>
-  <aside id="panel" aria-label="Tactics panel">
-    <header><h1>Tactics <span>Lab</span></h1><div><button id="theme" title="Theme">Auto</button><button id="panel-close" aria-label="Close panel">Close</button></div></header>
-    <section id="sec-match"><h2>Match play</h2><div id="match-ui"></div></section>
-    <section id="sec-scenarios">
-      <h2>Scenarios</h2>
-      <textarea id="scenario-text" rows="3" style="width:100%" placeholder="Describe a situation, e.g. ‘their full-back keeps getting free on the overlap’"></textarea>
-      <div class="row">
-        <button class="btn primary" id="scenario-build">Build</button>
-        <button class="btn" id="scenario-cancel" hidden>Cancel</button>
-        <button class="btn" id="scenario-example">Load example</button>
+      <div class="tabpanes">
+        <div class="pane" data-pane="stats">
+          <div class="group"><h3>Readout</h3><div id="readout"></div></div>
+          <div class="group"><h3>Selected player</h3><div id="selected"></div></div>
+        </div>
+        <div class="pane" data-pane="setup" hidden>
+          <div class="group"><h3>What the board shows</h3>
+            <div class="row"><span class="seg" id="views"></span></div>
+            <div class="row">Coverage
+              <span class="seg" id="coverage"><button data-cov="control">Control</button><button data-cov="zones">Zones</button><button data-cov="off">Off</button></span>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" data-layer="lanes"> Passing lanes</label>
+              <label><input type="checkbox" data-layer="lines"> Lines broken</label>
+              <label><input type="checkbox" data-layer="offside"> Offside line</label>
+              <label><input type="checkbox" data-layer="shape"> Team shape</label>
+              <label><input type="checkbox" data-layer="roles"> Role labels</label>
+            </div>
+          </div>
+          <div class="group"><h3>Teams</h3>
+            <div class="row">
+              <label>Blue <select id="formation-home"></select></label>
+              <label>Red <select id="formation-away"></select></label>
+            </div>
+            <div class="row">
+              <label>Ball <select id="possession"><option value="home">Blue</option><option value="away">Red</option></select></label>
+              <label><input type="checkbox" id="show-away"> Show red team</label>
+            </div>
+            <div class="row"><button class="btn" id="to-base">Back to base</button><button class="btn" id="make-base">Make this the base</button></div>
+          </div>
+          <div class="group"><h3>Shortcuts</h3>
+            <ul class="plain">
+              <li><kbd>V</kbd> Move <kbd>R</kbd> Runs <kbd>P</kbd> Pass</li>
+              <li><kbd>Space</kbd> Play <kbd>B</kbd> Back to base <kbd>L</kbd> View</li>
+              <li><kbd>C</kbd> Coverage <kbd>Esc</kbd> Deselect <kbd>Delete</kbd> Remove run</li>
+            </ul>
+          </div>
+        </div>
+        <div class="pane" data-pane="scen" hidden>
+          <div class="group"><h3>Build scenarios</h3>
+            <textarea id="scenario-text" rows="3" placeholder="Describe a situation, e.g. ‘their full-back keeps getting free on the overlap’"></textarea>
+            <div class="row">
+              <button class="btn primary" id="scenario-build">Build</button>
+              <button class="btn" id="scenario-cancel" hidden>Cancel</button>
+              <button class="btn" id="scenario-example">Load example</button>
+            </div>
+            <p class="muted" id="scenario-status" role="status"></p>
+          </div>
+          <div id="scenario-ui"></div>
+        </div>
+        <div class="pane" data-pane="saved" hidden>
+          <div class="group"><h3>Save this setup</h3>
+            <form class="row" id="save-form">
+              <input type="text" id="save-name" class="grow" placeholder="Name this setup" maxlength="40" aria-label="Setup name">
+              <button class="btn primary">Save</button>
+            </form>
+          </div>
+          <ul class="plain" id="saved-list"></ul>
+        </div>
       </div>
-      <p class="muted" id="scenario-status" role="status"></p>
-      <div id="scenario-ui"></div>
-    </section>
-    <section><h2>Readout</h2><div id="readout"></div></section>
-    <section><h2>Selected player</h2><div id="selected"></div></section>
-    <section>
-      <h2>Layers</h2>
-      <div class="row">View
-        <span class="seg" id="views"></span>
-      </div>
-      <div class="row">Coverage
-        <span class="seg" id="coverage">
-          <button data-cov="control">Control</button><button data-cov="zones">Zones</button><button data-cov="off">Off</button>
-        </span>
-      </div>
-      <div class="row">
-        <label><input type="checkbox" data-layer="lanes"> Passing lanes</label>
-        <label><input type="checkbox" data-layer="lines"> Lines broken</label>
-        <label><input type="checkbox" data-layer="offside"> Offside line</label>
-        <label><input type="checkbox" data-layer="shape"> Team shape</label>
-        <label><input type="checkbox" data-layer="roles"> Role labels</label>
-      </div>
-    </section>
-    <section>
-      <h2>Match state</h2>
-      <div class="row">
-        <label>Home <select id="formation-home"></select></label>
-        <label>Away <select id="formation-away"></select></label>
-      </div>
-      <div class="row">
-        <label>Ball <select id="possession"><option value="home">Home</option><option value="away">Away</option></select></label>
-        <label><input type="checkbox" id="show-away"> Show opposition</label>
-      </div>
-      <div class="row">
-        <button class="btn" id="to-base">Back to base</button>
-        <button class="btn" id="make-base">Make this the base</button>
-      </div>
-    </section>
-    <section>
-      <h2>Saved tactics</h2>
-      <form class="row" id="save-form">
-        <input type="text" id="save-name" class="grow" placeholder="Name this setup" maxlength="40" aria-label="Setup name">
-        <button class="btn primary">Save</button>
-      </form>
-      <ul class="plain" id="saved-list"></ul>
-    </section>
-    <section>
-      <h2>Shortcuts</h2>
-      <ul class="plain">
-        <li><kbd>V</kbd> Move <kbd>R</kbd> Runs <kbd>P</kbd> Pass</li>
-        <li><kbd>Space</kbd> Play <kbd>B</kbd> Back to base</li>
-        <li><kbd>L</kbd> Change view <kbd>C</kbd> Cycle coverage <kbd>Esc</kbd> Deselect</li>
-        <li><kbd>Delete</kbd> Remove selected run or queued pass</li>
-      </ul>
-    </section>
-  </aside>
+    </aside>
+  </div>
 </div>
+
 <script>
 'use strict';
 
@@ -1143,7 +1189,7 @@ function badge(x, y, text) {
    Sizes are in metres but floored in pixels so they stay legible and
    touchable on a phone, where 1 m can be ~5 px.
    ================================================================ */
-const playerR = () => Math.max(PLAYER_R, 7 / view.s);
+const playerR = () => Math.max(PLAYER_R, (state.match ? 9 : 7) / view.s);
 const FONT_COND = "'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif";
 
 // Lighten (amt > 0) or darken (amt < 0) a #rrggbb colour.
@@ -1352,13 +1398,24 @@ canvas.addEventListener('pointerdown', (ev) => {
   if (anim) return;
   const pt = pointerPitch(ev);
   const hit = hitTest(pt);
+  if (!hit && state.match?.status === 'defending') {
+    const lane = laneAt(pt);
+    if (lane) { cutLane(lane); return; }
+  }
   if (!hit) {
     state.selected = null;
     requestRender();
     return;
   }
   const t = hit.target;
+  // A tap near (but not on) one of your players still cuts the lane under it.
+  if (state.match?.status === 'defending' && hit.kind === 'player' && t.team === 'home' && dist(pt, t) > playerR() * 1.05) {
+    const lane = laneAt(pt);
+    if (lane) { cutLane(lane); return; }
+  }
   if (state.match && (hit.kind !== 'player' || t.team !== 'home' || state.match.status !== 'defending')) {
+    const lane = state.match.status === 'defending' && laneAt(pt);
+    if (lane) { cutLane(lane); return; }
     if (hit.kind === 'player') state.selected = t.id;
     requestRender();
     return;
@@ -1670,7 +1727,7 @@ function drawPasses() {
    ================================================================ */
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const who = (p) => `${p.team === 'home' ? 'Home' : 'Away'} #${p.num} ${p.role}`;
+const who = (p) => `${p.team === 'home' ? 'Blue' : 'Red'} #${p.num} ${p.role}`;
 function setHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
 for (const team of ['home', 'away']) {
   const sel = $(`#formation-${team}`);
@@ -2049,22 +2106,22 @@ const PRESETS = [
   // Easiest first. Balance-tested against a greedy lane-cutting defender:
   // the first one is lost by standing still and won by cutting lanes.
   {
-    stars: 1, name: 'Overload on our right', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
-    desc: 'Their full-back, #8 and winger gang up on your right side. Stop them getting into the box for four phases.',
+    stars: 1, name: 'Overload on our right', win: 'box', phases: 3, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'Their full-back, #8 and winger gang up on your right side. Stop them getting into the box for three phases.',
     ball: { x: 56.6, y: 62 },
     home: [P(1, 6, 34), P(3, 26, 14), P(4, 24, 28), P(5, 24, 40), P(2, 30, 56), P(11, 40, 16), P(8, 40, 30), P(6, 40, 42), P(7, 44, 58), P(9, 54, 30), P(10, 52, 44)],
     away: [P(1, 98, 34), P(3, 58, 62), P(4, 70, 42), P(5, 72, 24), P(2, 62, 10), P(6, 60, 36), P(8, 50, 50), P(10, 52, 26), P(11, 38, 60), P(9, 36, 34), P(7, 40, 14)],
   },
   {
-    stars: 2, name: 'Break our mid-block', win: 'box', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
-    desc: 'They build from the back against your 4-4-2 block. Keep them out of your box for four phases.',
+    stars: 2, name: 'Break our mid-block', win: 'final3', phases: 4, homeFormation: '4-4-2', awayFormation: '4-3-3',
+    desc: 'They build from the back against your 4-4-2 block. Keep them out of your defensive third (the last 35 m) for four phases.',
     ball: { x: 78.6, y: 44 },
     home: [P(1, 6, 34), P(3, 34, 10), P(4, 30, 27), P(5, 30, 41), P(2, 34, 58), P(11, 46, 12), P(8, 44, 28), P(6, 44, 40), P(7, 46, 56), P(9, 58, 30), P(10, 58, 40)],
     away: [P(1, 100, 34), P(3, 74, 62), P(4, 80, 44), P(5, 82, 24), P(2, 74, 6), P(6, 68, 34), P(8, 60, 46), P(10, 60, 22), P(11, 50, 60), P(9, 46, 34), P(7, 50, 8)],
   },
   {
-    stars: 3, name: 'Stop the counter', win: 'box', phases: 4, homeFormation: '4-3-3', awayFormation: '4-4-2',
-    desc: 'You lost it high up the pitch with your full-backs forward. Keep them out of your box for four phases.',
+    stars: 3, name: 'Stop the counter', win: 'box', phases: 5, homeFormation: '4-3-3', awayFormation: '4-4-2',
+    desc: 'You lost it high up the pitch with your full-backs forward. Keep them out of your box for five phases.',
     ball: { x: 56.6, y: 30 },
     home: [P(1, 14, 34), P(3, 52, 8), P(4, 40, 26), P(5, 40, 42), P(2, 54, 60), P(6, 56, 37), P(8, 64, 24), P(10, 64, 46), P(11, 74, 12), P(9, 78, 34), P(7, 74, 56)],
     away: [P(1, 100, 34), P(3, 76, 60), P(4, 80, 42), P(5, 80, 26), P(2, 76, 8), P(11, 60, 58), P(8, 62, 42), P(6, 58, 30), P(7, 60, 10), P(9, 50, 44), P(10, 48, 24)],
@@ -2077,6 +2134,9 @@ const PRESETS = [
     away: [P(1, 90, 34), P(3, 44, 62), P(4, 56, 44), P(5, 56, 26), P(2, 44, 8), P(6, 40, 34), P(8, 30, 36), P(10, 30, 24), P(11, 20, 58), P(9, 17, 34), P(7, 20, 10)],
   },
 ];
+
+// Where a player will be once the telegraphed runs are done.
+const plannedAt = (q) => { const e = q.team === 'away' && state.match?.planned?.get(q.id); return e ? { x: e.x, y: e.y } : { x: q.x, y: q.y }; };
 
 const inOurBox = (p) => p.x <= PITCH.boxD && p.y >= (PITCH.W - PITCH.boxW) / 2 && p.y <= (PITCH.W + PITCH.boxW) / 2;
 function reachedTarget(win, pt) {
@@ -2131,14 +2191,18 @@ function evaluateShot(from, at = finalPos) {
 // Scores candidate run ends on free space, forward progress and whether
 // they open a pass from the ball; then picks the best uncut pass, a shot
 // when it's on, or else a dribble into the largest gap.
-function heuristicPlan() {
-  const m = state.match, holder = carrier(), ball = state.ball;
-  const home = homeSide(), away = awaySide();
+// The attackers commit to their runs at the start of each phase and the
+// board shows them, so the lanes you see are the lanes you're defending.
+// Up to four runners nearest the ball, each scored on free space, forward
+// progress and whether the run opens a lane from the ball.
+function planRuns() {
+  const holder = carrier(), ball = state.ball;
+  const home = homeSide();
   const space = (pt) => Math.min(...home.map((h) => dist(h, pt)));
   const ends = new Map();
-  const runs = [];
-  for (const p of away) {
-    if (p === holder || p.unit === 'G' || dist(p, ball) > 50) continue;
+  const runners = awaySide().filter((p) => p !== holder && p.unit !== 'G' && dist(p, ball) <= 45)
+    .sort((a, b) => dist(a, ball) - dist(b, ball)).slice(0, 4);
+  for (const p of runners) {
     let best = { x: p.x, y: p.y }, bestS = -Infinity;
     for (let a = 0; a < 16; a++) {
       for (const r of [0, 6, 12]) {
@@ -2152,10 +2216,19 @@ function heuristicPlan() {
         if (s > bestS) { bestS = s; best = c; }
       }
     }
-    ends.set(p.id, best);
-    if (dist(p, best) >= 2) runs.push({ num: p.num, x: best.x, y: best.y, bend: 0 });
+    // A slight curve away from the ball reads as a real run.
+    if (dist(p, best) >= 3) ends.set(p.id, { ...best, bend: (best.y > ball.y ? -1 : 1) * attackDir('away') * 0.18 });
   }
-  const at = (q) => (q.team === 'away' && ends.has(q.id) ? ends.get(q.id) : { x: q.x, y: q.y });
+  return ends;
+}
+
+function heuristicPlan() {
+  const m = state.match, holder = carrier(), ball = state.ball;
+  const home = homeSide(), away = awaySide();
+  const space = (pt) => Math.min(...home.map((h) => dist(h, pt)));
+  const ends = m.planned || new Map();
+  const runs = [...ends].map(([id, e]) => ({ num: away.find((p) => p.id === id).num, x: e.x, y: e.y, bend: e.bend }));
+  const at = plannedAt;
 
   // Best uncut pass.
   let pick = null;
@@ -2262,13 +2335,14 @@ function startMatch(setup, difficulty) {
   beginPhase();
   setTool('move');
   state.selected = null;
-  toast(`Phase 1 of ${setup.phases}: set your shape, then lock in`);
+
   renderMatchUI();
 }
 
 function beginPhase() {
   const m = state.match;
   m.starts = new Map(homeSide().map((p) => [p.id, { x: p.x, y: p.y }]));
+  m.planned = planRuns();
   m.status = 'defending';
 }
 
@@ -2284,6 +2358,8 @@ function fixOffside() {
 async function lockIn() {
   const m = state.match;
   if (!m || m.status !== 'defending' || anim) return;
+  const T = computeThreats();
+  m.worstOpen = Math.max(m.worstOpen || 0, T ? T.open : 0);
   m.status = 'thinking';
   fixOffside();
   state.selected = null;
@@ -2292,6 +2368,8 @@ async function lockIn() {
   try { plan = await getOpponentPlan(); } catch { plan = null; }
   if (!state.match || state.match !== m) return;
   if (!plan) { plan = sanitizePlan(heuristicPlan()); m.source = 'heuristic'; }
+  plan.runs = [...m.planned].map(([id, e]) => ({ p: state.players.find((q) => q.id === id), run: { x: e.x, y: e.y, bend: e.bend || 0 } }))
+    .filter((r) => r.p && r.p !== carrier());
   m.status = 'resolving';
   renderMatchUI();
   resolvePhase(plan);
@@ -2383,6 +2461,9 @@ onPlayFinished = (outcome, extra) => {
     m.status = 'over';
     m.result = over;
     recordResult(over.you);
+    m.stars = over.you ? (m.worstOpen ? (m.worstOpen <= 1 ? 2 : 1) : 3) : 0;
+    const lvl = PRESETS.indexOf(m.setup);
+    if (lvl >= 0 && m.stars > starsFor(lvl)) { progress.stars[lvl] = m.stars; store.set(PROGRESS_KEY, progress); }
     if (over.you) { confetti(); flash('win'); }
     else if (outcome?.result !== 'goal') flash('goal');
   } else {
@@ -2415,22 +2496,23 @@ function exitMatch() {
 }
 
 // --- Live threats ----------------------------------------------------------
-// While you set your shape, every pass from their carrier is judged by
-// resolvePass() against where everyone stands now, plus a shot check, so
-// you can watch lanes close as you drag. (Their runs can still reopen one.)
+// While you set your shape, every pass from their carrier to where each
+// player will be after the telegraphed runs is judged by resolvePass(),
+// plus a shot check, so you can watch lanes close as you drag.
 function computeThreats() {
   const holder = carrier();
   if (!holder || holder.team !== 'away') return null;
   const here = (q) => ({ x: q.x, y: q.y });
   const line = offsideLine('away');
   const passes = awaySide().filter((r) => r !== holder).map((r) => {
-    const o = resolvePass('away', { ...state.ball, id: holder.id }, r, r, here);
+    const to = plannedAt(r);
+    const o = resolvePass('away', { ...state.ball, id: holder.id }, to, r, plannedAt);
     const offside = r.x < line - 1e-9;
-    const gain = state.ball.x - r.x, breaks = linesBroken(state.ball, r, 'away');
+    const gain = state.ball.x - to.x, breaks = linesBroken(state.ball, to, 'away');
     const ok = o.result === 'complete' && !offside;
     // Only forward passes that gain ground or break a line are threats;
     // recycling it backwards or square is not.
-    return { r, o, offside, gain, breaks, open: ok && (gain >= 6 || breaks > 0), safe: ok && gain < 6 && !breaks };
+    return { r, to, o, offside, gain, breaks, open: ok && (gain >= 6 || breaks > 0), safe: ok && gain < 6 && !breaks };
   });
   const shot = evaluateShot(state.ball, here);
   const shotOn = !!shot.best && !shot.saved && shot.d < 30;
@@ -2442,8 +2524,19 @@ function drawThreats(T) {
   const b = state.ball, r = playerR();
   ctx.lineCap = 'round';
   const danger = T.passes.filter((p) => p.open).sort((a, c) => c.gain - a.gain)[0];
+  // Telegraphed runs: dashed arrows to a ghost of where each runner ends up.
+  for (const [id, e] of state.match.planned || []) {
+    const q = state.players.find((pl) => pl.id === id);
+    if (!q) continue;
+    const g = runGeom(q, e);
+    ctx.strokeStyle = colors.awayRun; ctx.globalAlpha = 0.8; ctx.lineWidth = lineWidthM(0.18); ctx.setLineDash([0.8, 0.6]);
+    ctx.beginPath(); ctx.moveTo(g.S.x, g.S.y); ctx.quadraticCurveTo(g.C.x, g.C.y, g.E.x, g.E.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = colors.away; ctx.lineWidth = lineWidthM(0.2);
+    circle(e.x, e.y, r * 0.85);
+    ctx.globalAlpha = 1;
+  }
   for (const p of T.passes) {
-    const to = p.r;
+    const to = p.to;
     if (p.safe) {
       ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = lineWidthM(0.12);
       line(b.x, b.y, to.x, to.y);
@@ -2458,7 +2551,7 @@ function drawThreats(T) {
       ctx.strokeStyle = colors.offside; ctx.globalAlpha = 0.6;
       ctx.lineWidth = lineWidthM(0.14); ctx.setLineDash([0.5, 0.7]);
       line(b.x, b.y, to.x, to.y); ctx.setLineDash([]); ctx.globalAlpha = 1;
-    } else if (dist(b, to) < 32) {
+    } else if (dist(b, to) < 32 && !p.safe) {
       // Cut: a faint stub up to where it dies, marked with a cross.
       const at = p.o.point;
       ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = lineWidthM(0.12); ctx.setLineDash([0.4, 0.6]);
@@ -2481,17 +2574,16 @@ function updateHud() {
   const m = state.match, hud = $('#hud');
   if (!m || m.status === 'over') { hud.hidden = true; return; }
   hud.hidden = false;
-  const head = `<div class="hud-top"><b>Phase ${m.phase}/${m.total}</b><span>Don’t let them ${esc(WIN_SHORT[m.win])}</span></div>`;
-  if (m.status !== 'defending') {
-    setHTML(hud, head + `<div class="hud-line pulse">${m.status === 'thinking' ? 'They’re reading your shape…' : 'Playing it out…'}</div>`);
-    return;
-  }
+  const pips = Array.from({ length: m.total }, (_, i) => `<i class="${i + 1 < m.phase ? 'done' : i + 1 === m.phase ? 'now' : ''}"></i>`).join('');
+  let cells = `<div class="cell"><span class="k">Phase ${m.phase} of ${m.total}</span><span class="pips">${pips}</span></div>
+    <div class="cell obj"><span class="k">Stop them</span><span class="v">${esc(WIN_SHORT[m.win])}</span></div>`;
   const T = A.threats;
-  if (!T) { setHTML(hud, head); return; }
-  const passLine = T.open ? `<span class="bad">${T.open} lane${T.open > 1 ? 's' : ''} open</span>` : '<span class="good">Lanes cut ✓</span>';
-  const shotLine = T.shotOn ? `<span class="bad">Shot ${Math.round(T.shot.odds * 100)}%</span>` : '<span class="good">Shot covered</span>';
-  setHTML(hud, head + `<div class="hud-line">${passLine} · ${shotLine}</div>
-    <div class="hud-tip">Drag players to cut the red lanes. Step your line up to catch runners offside. Then lock in.</div>`);
+  if (m.status !== 'defending') cells += `<div class="cell"><span class="k">Opponent</span><span class="v pulse">${m.status === 'thinking' ? 'Reading you…' : 'Attacking…'}</span></div>`;
+  else if (T) {
+    cells += `<div class="cell"><span class="k">Open lanes</span><span class="v ${T.open ? 'bad' : 'good'}">${T.open ? T.open : 'None ✓'}</span></div>
+      <div class="cell"><span class="k">Shot</span><span class="v ${T.shotOn ? 'bad' : 'good'}">${T.shotOn ? Math.round(T.shot.odds * 100) + '%' : 'Covered'}</span></div>`;
+  }
+  setHTML(hud, cells);
 }
 
 // --- Effects ---------------------------------------------------------------
@@ -2586,99 +2678,200 @@ function drawMatch() {
 
 // --- Match panel -----------------------------------------------------------
 let matchPreset = 0, matchDifficulty = 'normal', matchBusy = false, matchNote = '';
+let appMode = 'play';
+
+// Level progress: best stars per level; a level unlocks once the one
+// before it has been won.
+const PROGRESS_KEY = 'tacticsLab.progress.v1';
+let progress = store.get(PROGRESS_KEY, null);
+if (!progress || typeof progress.stars !== 'object' || !progress.stars) progress = { stars: {} };
+const starsFor = (i) => Number(progress.stars[i]) || 0;
+const unlocked = (i) => i === 0 || starsFor(i - 1) > 0;
+const starText = (n) => `${'★'.repeat(n)}<span class="off">${'★'.repeat(3 - n)}</span>`;
+matchDifficulty = ['easy', 'normal', 'hard'].includes(store.get('tacticsLab.difficulty', 'normal')) ? store.get('tacticsLab.difficulty', 'normal') : 'normal';
+
 function renderMatchUI() {
-  const m = state.match;
-  const keepText = $('#match-text')?.value;
-  try { renderMatchPanel(m); } finally { if (keepText != null && $('#match-text')) $('#match-text').value = keepText; }
-  renderResult();
-  $('#match-quick').hidden = !!m;
-  $('#stage').classList.toggle('in-match', !!m);
-}
-function renderMatchPanel(m) {
-  $('#lockin').hidden = !(m && m.status !== 'over');
+  const m = state.match, play = appMode === 'play';
+  $('#levels').hidden = !(play && !m);
+  $('#playbar').hidden = !(m && m.status !== 'over');
   $('#lockin').disabled = !(m && m.status === 'defending');
-  $('#play').hidden = !!m;
-  for (const b of document.querySelectorAll('[data-tool]')) b.hidden = !!m && b.dataset.tool !== 'move';
-  if (!m) {
-    const p = PRESETS[matchPreset];
-    setHTML($('#match-ui'), `
-      <p class="muted" style="margin-top:0">They attack, you defend. Each phase, drag your players to cut their passing lanes, then lock in. Record: ${esc(recordText())}</p>
-      <div class="row"><select id="match-preset" class="grow">${PRESETS.map((q, i) => `<option value="${i}" ${i === matchPreset ? 'selected' : ''}>${'★'.repeat(q.stars || 2)}${'☆'.repeat(3 - (q.stars || 2))}  ${esc(q.name)}</option>`).join('')}</select></div>
-      <p style="margin:4px 0">${esc(p.desc)}</p>
-      <div class="row">Difficulty <span class="seg">${Object.keys(RING).map((d) =>
-        `<button data-diff="${d}" aria-pressed="${d === matchDifficulty}">${d[0].toUpperCase() + d.slice(1)} · ${RING[d]} m</button>`).join('')}</span></div>
-      <div class="row"><button class="btn primary" id="match-start" ${matchBusy ? 'disabled' : ''}>${matchBusy ? 'Setting up…' : 'Start match'}</button></div>
-      <textarea id="match-text" rows="2" style="width:100%" placeholder="Or describe a situation to defend (needs the model)"></textarea>
-      <div class="row"><button class="btn" id="match-custom" ${matchBusy ? 'disabled' : ''}>Start from description</button></div>
-      ${matchNote ? `<p class="muted">${esc(matchNote)}</p>` : ''}`);
-    return;
-  }
-  const status = { defending: 'Drag your players to cut the red lanes, then lock in.', thinking: 'They’re reading your shape…', resolving: 'Playing it out…', over: '' }[m.status];
-  const log = m.log.slice().reverse().map((e) => `<li style="display:block"><b>Phase ${e.phase}</b> · ${esc(e.action)}${e.source === 'heuristic' ? ' <span class="muted">(built-in)</span>' : ''}<br>
-    <i>“${esc(e.thinking)}”</i><br>${esc(e.outcome)}${e.note ? `<br><span class="muted">${esc(e.note)}</span>` : ''}</li>`).join('');
-  setHTML($('#match-ui'), `
-    <div><b>${esc(m.setup.name)}</b> · ${esc(m.difficulty)}</div>
-    <p style="margin:4px 0">They win if they ${esc(WIN_TEXT[m.win])}. ${m.status === 'over' ? '' : `Phase ${m.phase} of ${m.total}.`}</p>
-    ${m.result ? `<p style="margin:6px 0;font-weight:600;color:${m.result.you ? '#16a34a' : '#e11d48'}">${m.result.you ? 'You win.' : 'They win.'} ${esc(m.result.reason)}</p>` : `<p class="muted" style="margin:4px 0">${status}</p>`}
-    <div class="row">
-      ${m.status === 'over' ? '<button class="btn primary" id="match-retry">Try again</button><button class="btn" id="match-debrief">Debrief</button>' : `<button class="btn primary" id="match-lock" ${m.status === 'defending' ? '' : 'disabled'}>Lock in</button>`}
-      <button class="btn" id="match-exit">${m.status === 'over' ? 'Back to board' : 'Quit'}</button>
-    </div>
-    <div id="debrief">${m.debrief ? esc(m.debrief).split(/\n\s*\n/).map((para) => `<p>${para}</p>`).join('') : ''}</div>
-    <ul class="plain">${log}</ul>`);
+  $('#reset-phase').disabled = !(m && m.status === 'defending');
+  $('#toolbar').hidden = play;
+  $('#stage').classList.toggle('in-match', !!m);
+  $('#record-chip').innerHTML = record.w + record.l ? `<b>${record.w}</b> won · <b>${record.l}</b> lost${record.streak > 1 ? ` · <b>${record.streak}</b> in a row` : ''}` : '';
+  renderLevels();
+  renderResult();
+  renderCoach();
 }
 
-$('#match-ui').addEventListener('click', (ev) => {
+function renderLevels() {
+  if ($('#levels').hidden) return;
+  const keep = $('#match-text')?.value;
+  const cards = PRESETS.map((p, i) => {
+    const locked = !unlocked(i);
+    return `<button class="level" data-level="${i}" ${locked || matchBusy ? 'disabled' : ''}>
+      <span class="n">${i + 1}</span>
+      <span class="name">${esc(p.name)}</span>
+      <span class="brief">${esc(p.desc)}</span>
+      <span class="meta"><span>${p.phases} phases</span><span class="stars" aria-label="${starsFor(i)} of 3 stars">${starText(starsFor(i))}</span></span>
+      ${locked ? `<span class="lock">Win level ${i} to unlock</span>` : ''}
+    </button>`;
+  }).join('');
+  setHTML($('#levels'), `<div class="sheet">
+    <div>
+      <div class="eyebrow">Defending challenges</div>
+      <h1 class="headline">Hold the line</h1>
+      <p class="lede">They have the ball, you defend. Red lines show passes they can play. Tap a red line to send your nearest player to cut it, or drag players yourself. Then lock in and watch what they try.</p>
+    </div>
+    <div class="difficulty"><span class="muted">Each player can move</span>
+      <span class="seg">${Object.keys(RING).map((d) => `<button data-diff="${d}" aria-pressed="${d === matchDifficulty}">${RING[d]} m${d === 'easy' ? ' · easy' : d === 'hard' ? ' · hard' : ''}</button>`).join('')}</span>
+    </div>
+    <div class="levels">${cards}
+      <div class="level custom">
+        <span class="name">Your own situation</span>
+        <span class="brief">Describe a moment to defend. Needs an AI connection.</span>
+        <textarea id="match-text" rows="2" placeholder="e.g. their winger cuts inside onto his left foot"></textarea>
+        <div class="row"><button class="btn" id="match-custom" ${matchBusy ? 'disabled' : ''}>${matchBusy ? 'Setting up…' : 'Start'}</button></div>
+        ${matchNote ? `<span class="brief">${esc(matchNote)}</span>` : ''}
+      </div>
+    </div>
+    <p class="muted">Three stars: win without leaving a red lane open when you lock in.</p>
+  </div>`);
+  if (keep != null && $('#match-text')) $('#match-text').value = keep;
+}
+
+$('#levels').addEventListener('click', (ev) => {
   const t = ev.target.closest('button');
-  if (!t) return;
-  if (t.dataset.diff) { matchDifficulty = t.dataset.diff; renderMatchUI(); }
-  else if (t.id === 'match-start') { setPanel(false); startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]); }
+  if (!t || t.disabled) return;
+  if (t.dataset.diff) { matchDifficulty = t.dataset.diff; store.set('tacticsLab.difficulty', matchDifficulty); renderMatchUI(); }
+  else if (t.dataset.level != null) startLevel(+t.dataset.level);
   else if (t.id === 'match-custom') {
     const d = $('#match-text').value.trim();
-    if (d) { setPanel(false); startFromModel(d, null); } else { matchNote = 'Describe a situation first.'; renderMatchUI(); }
+    if (d) startFromModel(d, null); else { matchNote = 'Describe a situation first.'; renderMatchUI(); }
   }
-  else if (t.id === 'match-lock') lockIn();
-  else if (t.id === 'match-retry') { startMatch(state.match.setup, state.match.difficulty); renderMatchUI(); }
-  else if (t.id === 'match-exit') exitMatch();
-  else if (t.id === 'match-debrief') requestDebrief();
-  requestRender();
 });
-$('#match-ui').addEventListener('change', (ev) => { if (ev.target.id === 'match-preset') { matchPreset = +ev.target.value; renderMatchUI(); } });
-$('#lockin').addEventListener('click', lockIn);
+
+// Levels always use their own balance-tested setups (the model, when
+// connected, still plays the opponent); only "your own situation" asks the
+// model for a setup.
+function startLevel(i) {
+  if (anim || matchBusy) return;
+  matchPreset = i;
+  startMatch(PRESETS[i], matchDifficulty);
+}
+
 let requestDebrief = () => {};
 
-// Result card over the board: the moment the game ends, what happened
-// and the obvious next moves, without opening the panel.
+// Result card: what happened, the stars earned, and the obvious next move.
 function renderResult() {
   const m = state.match, el = $('#result');
   if (!m || m.status !== 'over') { el.hidden = true; return; }
   el.hidden = false;
-  const next = PRESETS[(PRESETS.indexOf(m.setup) + 1) % PRESETS.length] || PRESETS[0];
-  setHTML(el, `<div class="card ${m.result.you ? 'won' : 'lost'}">
-    <div class="big">${m.result.you ? 'You win!' : m.result.reason.startsWith('Goal') ? 'Goal. They score.' : 'They got through.'}</div>
+  const i = PRESETS.indexOf(m.setup), won = m.result.you;
+  const hasNext = i >= 0 && i + 1 < PRESETS.length;
+  const title = won ? 'You held them' : m.result.reason.startsWith('Goal') ? 'Goal against' : 'They broke through';
+  setHTML(el, `<div class="card ${won ? 'won' : 'lost'}">
+    <div class="eyebrow">${i >= 0 ? `Level ${i + 1} · ` : ''}${esc(m.setup.name)}</div>
+    <div class="big">${title}</div>
+    ${won ? `<div class="stars" aria-label="${m.stars} of 3 stars">${starText(m.stars)}</div>` : ''}
     <p>${esc(m.result.reason)}</p>
-    <p class="rec">${esc(recordText())}</p>
+    ${won && m.stars < 3 ? '<p class="muted">For three stars, lock in with no red lanes open in every phase.</p>' : ''}
+    ${!won ? '<p class="muted">Tip: tap each red lane before you lock in. If a runner is behind your line, step the line up to catch him offside.</p>' : ''}
     <div class="debrief">${m.debrief ? esc(m.debrief).split(/\n\s*\n/).map((p) => `<p>${p}</p>`).join('') : ''}</div>
     <div class="row">
-      <button class="btn primary" data-r="retry">Try again</button>
-      <button class="btn" data-r="next">Next: ${esc(next.name)}</button>
-      <button class="btn" data-r="debrief" ${m.debrief ? 'hidden' : ''}>Debrief</button>
-      <button class="btn" data-r="exit">Back to board</button>
+      ${won && hasNext ? `<button class="btn primary" data-r="next">Next level</button><button class="btn" data-r="retry">Replay</button>`
+        : `<button class="btn primary" data-r="retry">Try again</button>`}
+      <button class="btn" data-r="levels">All levels</button>
+      <button class="btn" data-r="debrief" ${m.debrief || m.debriefing ? 'hidden' : ''}>Coach’s debrief</button>
     </div></div>`);
 }
 $('#result').addEventListener('click', (ev) => {
   const t = ev.target.closest('[data-r]');
   if (!t) return;
   const m = state.match;
-  if (t.dataset.r === 'retry') startMatch(m.setup, m.difficulty);
-  else if (t.dataset.r === 'next') {
-    matchPreset = (PRESETS.indexOf(m.setup) + 1) % PRESETS.length;
-    startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]);
-  } else if (t.dataset.r === 'debrief') requestDebrief();
-  else if (t.dataset.r === 'exit') exitMatch();
+  if (t.dataset.r === 'retry') startMatch(m.setup, matchDifficulty);
+  else if (t.dataset.r === 'next') { exitMatch(); startLevel(PRESETS.indexOf(m.setup) + 1); }
+  else if (t.dataset.r === 'levels') exitMatch();
+  else if (t.dataset.r === 'debrief') requestDebrief();
   requestRender();
 });
-renderMatchUI();
+
+// First-level coaching, until dismissed.
+const COACH_KEY = 'tacticsLab.coached';
+function renderCoach() {
+  const m = state.match, el = $('#coach');
+  const show = m && m.status === 'defending' && PRESETS.indexOf(m.setup) === 0 && m.phase === 1 && !store.get(COACH_KEY, false);
+  el.hidden = !show;
+  if (show) setHTML(el, `<span>Red lines are passes they can play. Tap one to send a player to cut it, then press <b>Lock in</b>.</span><button id="coach-ok">Got it</button>`);
+}
+$('#coach').addEventListener('click', (ev) => { if (ev.target.id === 'coach-ok') { store.set(COACH_KEY, true); renderCoach(); } });
+
+$('#lockin').addEventListener('click', lockIn);
+$('#reset-phase').addEventListener('click', () => {
+  const m = state.match;
+  if (!m || m.status !== 'defending') return;
+  for (const p of homeSide()) Object.assign(p, m.starts.get(p.id));
+  requestRender();
+});
+$('#quit-match').addEventListener('click', () => { exitMatch(); });
+
+// --- Tap a red lane to cut it ---------------------------------------------
+// Finds the open lane under the pointer and sends the defender who can reach
+// it with the shortest move. Ground passes are cut anywhere on the line;
+// long lofted balls can only be won near the landing spot.
+function laneAt(pt) {
+  const T = A.threats, b = state.ball;
+  if (!T) return null;
+  const tol = Math.max(1.6, 18 / view.s);
+  let best = null, bd = tol;
+  for (const p of T.passes) {
+    if (!p.open) continue;
+    const len = dist(b, p.to), ux = (p.to.x - b.x) / len, uy = (p.to.y - b.y) / len;
+    const t = clamp((pt.x - b.x) * ux + (pt.y - b.y) * uy, 0, len);
+    const d = Math.hypot(pt.x - (b.x + ux * t), pt.y - (b.y + uy * t));
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+function cutLane(p) {
+  const m = state.match, R = RING[m.difficulty], b = state.ball, to = p.to;
+  const len = dist(b, to), ux = (to.x - b.x) / len, uy = (to.y - b.y) / len;
+  const threatScore = () => { const T = computeThreats(); return T ? T.open * 10 + (T.shotOn ? 6 : 0) : 0; };
+  let best = null;
+  for (const q of homeSide()) {
+    const s = m.starts.get(q.id);
+    const t = len > LOFT_OVER ? len - 2 : clamp((s.x - b.x) * ux + (s.y - b.y) * uy, BALL_KEEPOUT + 0.4, len - 1.2);
+    const target = { x: b.x + ux * t, y: b.y + uy * t };
+    const d = dist(s, target);
+    if (d > R) continue;
+    // Try the move and score the whole picture, so covering this lane
+    // doesn't quietly open another one.
+    const was = { x: q.x, y: q.y };
+    q.x = target.x; q.y = target.y;
+    const score = threatScore() + d * 0.02 + (q.unit === 'G' ? 3 : 0);
+    q.x = was.x; q.y = was.y;
+    if (!best || score < best.score) best = { q, target, score };
+  }
+  if (!best) { toast('Nobody can reach that lane from where they started. Drag a player closer first.'); return; }
+  moveTo(best.q, best.target);
+}
+
+// Short slide for tap-to-cut moves.
+const tweens = [];
+function moveTo(p, to) {
+  tweens.push({ p, from: { x: p.x, y: p.y }, to, t0: performance.now(), dur: 260 });
+  requestRender();
+}
+function stepTweens() {
+  const now = performance.now();
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i], k = clamp((now - tw.t0) / tw.dur, 0, 1), e = 1 - (1 - k) ** 3;
+    tw.p.x = tw.from.x + (tw.to.x - tw.from.x) * e;
+    tw.p.y = tw.from.y + (tw.to.y - tw.from.y) * e;
+    if (k >= 1) { if (state.match) constrainDefender(tw.p); tweens.splice(i, 1); }
+  }
+  if (tweens.length) requestRender();
+}
 
 /* ================================================================
    Match play: model opponent and debrief
@@ -2695,7 +2888,7 @@ function noModelNotice() {
 }
 const f1 = (v) => v.toFixed(1);
 const rulesText = () => `Resolution rules (the board's engine applies exactly these):
-- Your runs happen first; the defenders do NOT move after locking in. Each run is at most ${MATCH_RUN_CAP} m. "bend" in [-0.7, 0.7] curves a run but only its end point matters for the outcome.
+- Your committed runs happen first; the defenders do NOT move after locking in. Only a run's end point matters for the outcome.
 - The ball carrier does not make a run; they pass, dribble or shoot.
 - PASS to a teammate at their run end (or current position if they don't run). A pass of ${LOFT_OVER} m or less is intercepted if any defender whose projection falls on the straight line from the ball to that end point is within 1.0 + 0.045 × pass length metres of the line. A pass longer than ${LOFT_OVER} m is lofted: nobody can intercept it in flight, but it is lost if any defender is within ${LOFT_LOSE_R} m of the landing point.
 - OFFSIDE: a pass to a player who was beyond the offside line (x smaller than the line, since you attack towards x = 0) at the START of the phase is offside and you lose the ball.
@@ -2708,10 +2901,10 @@ function matchPrompt() {
   const home = homeSide(), away = awaySide();
   const line = (p) => `#${p.num} ${p.role} (${f1(p.x)}, ${f1(p.y)})`;
   const options = away.filter((r) => r !== holder).map((r) => {
-    const o = resolvePass('away', { ...ball, id: holder.id }, r, r, (q) => ({ x: q.x, y: q.y }));
+    const end = plannedAt(r), o = resolvePass('away', { ...ball, id: holder.id }, end, r, plannedAt);
     const off = m.offsideAtStart.has(r.id);
     const status = off ? 'OFFSIDE (was beyond the line at phase start)' : o.result === 'complete' ? 'open right now' : o.result === 'intercepted' ? `cut out by your opponent's #${o.winner.num}` : `lofted, lost to #${o.winner.num}`;
-    return `  to #${r.num}: ${f1(dist(ball, r))} m, breaks ${linesBroken(ball, r, 'away')} line(s), ${status}`;
+    return `  to #${r.num} at (${f1(end.x)}, ${f1(end.y)}): ${f1(dist(ball, end))} m, breaks ${linesBroken(ball, end, 'away')} line(s), ${status}`;
   }).join('\n');
   const nearest = away.map((p) => {
     const d = home.reduce((b, h) => (dist(h, p) < dist(b, p) ? h : b));
@@ -2734,7 +2927,7 @@ Ball at (${f1(ball.x)}, ${f1(ball.y)}), carried by your #${holder.num}.
 Your players (away): ${away.map(line).join('; ')}.
 Defenders (home): ${home.map(line).join('; ')}.
 Offside line at the start of this phase: x = ${f1(m.offsideLineAtStart)}. Offside right now: ${[...m.offsideAtStart].map((id) => '#' + state.players.find((p) => p.id === id).num).join(', ') || 'nobody'}.
-Passes from the carrier with everyone where they stand now (runs change this):
+Passes from the carrier to where each player will be after the committed runs:
 ${options}
 Nearest defender to each of your players:
 ${nearest}
@@ -2742,10 +2935,11 @@ Shot from here right now: ${shotText}.
 Previous phases:
 ${log}
 
-Plan this phase. Find the weakness in the user's defensive shape and exploit it. Check your chosen action against the rules above using the run end points you choose.
+Your runs this phase are already committed and the user can see them: ${[...(m.planned || [])].map(([id, e]) => `#${state.players.find((p) => p.id === id).num} runs to (${f1(e.x)}, ${f1(e.y)})`).join('; ') || 'none'}. Passes to those players go to their run end.
+Choose the action for this phase. Find the weakness in the user's defensive shape and exploit it, checking your action against the rules above.
 Reply with JSON only:
-{"thinking": "one or two sentences to the user, in the second person, naming the gap in their shape (e.g. 'Your #8 has stepped out, so the lane to our #10 is open.')", "runs": [{"num": 9, "x": 0, "y": 0, "bend": 0}], "action": {"type": "pass", "to": 9}}
-action is one of {"type": "pass", "to": <shirt number>}, {"type": "dribble", "x": <end x>, "y": <end y>} or {"type": "shoot"}. runs may be empty.`;
+{"thinking": "one or two sentences to the user, in the second person, naming the gap in their shape (e.g. 'Your #8 has stepped out, so the lane to our #10 is open.')", "action": {"type": "pass", "to": 9}}
+action is one of {"type": "pass", "to": <shirt number>}, {"type": "dribble", "x": <end x>, "y": <end y>} or {"type": "shoot"}.`;
 }
 
 async function withTimeout(ms, fn) {
@@ -2850,6 +3044,440 @@ Write exactly three short paragraphs of plain text, no markdown, no headings, no
 };
 
 /* ================================================================
+   Simulation lab: engine
+   A continuous, time-based simulation of one attacking move, so a coach
+   can set a situation and instructions, watch it, run it many times and
+   compare. Everything is judged in seconds, not metres:
+   • players accelerate to a sprint of 7.5 m/s (keeper 6) after a
+     0.25 s reaction; off the ball they jog unless pressing, tracking a
+     runner or making a run;
+   • a ground pass leaves at ~15 m/s, a lofted ball at ~17 m/s plus hang
+     time, and a point on its path is lost if a defender can get there
+     before the ball does (the carrier estimates exactly this when it
+     chooses a pass);
+   • lofted balls must go forward and backward passes must be short
+     recycles, so the carrier chooses passes a player would choose:
+     likelihood of arrival × danger of the receiving spot, against the
+     cost of losing it there;
+   • the defending block (line height, pressing zone, width) shifts with
+     the ball; the nearest defender presses, one covers, and defenders
+     pick up runners who go beyond the line;
+   • attackers hold width, offer support angles and make runs in behind
+     timed to stay onside.
+   Every run has its own random seed, so 50 runs give a spread of
+   outcomes rather than one fixed answer.
+   ================================================================ */
+const SIM = {
+  DT: 0.1, MAX_T: 12, SPRINT: 7.5, GK_SPRINT: 6, JOG: 4.5, ACCEL: 6, REACT: 0.25,
+  DRIBBLE_V: 5.5, GROUND_V: 15, LOFT_V: 17, GROUND_MAX: 32, LOFT_MAX: 50, RECYCLE_MAX: 22,
+  CONTROL_R: 1.0, TACKLE_R: 1.1, DECIDE_EVERY: 0.3,
+};
+const LINE_DEPTH = { deep: 20, mid: 32, high: 44 };      // m from own goal for the back line
+const PRESS_ZONE = { off: 38, mid: 62, high: 110 };        // press once the ball is this close to our goal (m)
+const BLOCK_WIDTH = { narrow: 32, normal: 40, wide: 50 };  // m across the back line
+const DEFAULT_INSTR = { line: 'mid', press: 'mid', width: 'normal', attWidth: 'wide', runs: 'some', tempo: 'balanced' };
+
+// Seeded random numbers so any run can be replayed exactly.
+function rngFrom(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+
+// Distance "up the pitch" for a team: 0 at its own goal line, 105 at the
+// goal it attacks. Keeps every rule the same for both directions.
+const depthOf = (team, x) => (team === 'home' ? x : PITCH.L - x);
+const xAtDepth = (team, u) => (team === 'home' ? u : PITCH.L - u);
+const oppOf = (team) => (team === 'home' ? 'away' : 'home');
+
+// How dangerous a spot is for the team attacking from it: roughly the
+// chance a move ends in a goal from there (an expected-threat style
+// surface: ~0.4 on the penalty spot, ~0.1 at 30 m, ~0.01 at halfway).
+function threatAt(team, p) {
+  const u = depthOf(team, p.x), dg = Math.hypot(PITCH.L - u, p.y - PITCH.W / 2);
+  const central = 1 - Math.min(1, Math.abs(p.y - PITCH.W / 2) / 40) * 0.35;
+  return 0.9 * Math.exp(-dg / 14) * central;
+}
+
+// Expected goals for a shot from p: distance and the angle the goal mouth
+// subtends, reduced by bodies in the way.
+function shotXG(team, p, defenders) {
+  const gx = team === 'home' ? PITCH.L : 0;
+  // Angle between the lines to each post (dot product: no wrap-around at ±π).
+  const v1 = { x: gx - p.x, y: PITCH.goalY0 - p.y }, v2 = { x: gx - p.x, y: PITCH.goalY1 - p.y };
+  const angle = Math.acos(clamp((v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1), -1, 1));
+  const d = Math.hypot(gx - p.x, PITCH.W / 2 - p.y);
+  let xg = clamp(1.25 * angle * (1 - d / 45), 0, 0.85);
+  const goal = { x: gx, y: PITCH.W / 2 }, len = dist(p, goal), ux = (goal.x - p.x) / len, uy = (goal.y - p.y) / len;
+  for (const q of defenders) {
+    const t = (q.x - p.x) * ux + (q.y - p.y) * uy;
+    if (t <= 0 || t >= len) continue;
+    const perp = Math.abs((q.x - p.x) * uy - (q.y - p.y) * ux);
+    if (perp < 1.5) xg *= q.unit === 'G' ? 0.6 : 0.55;     // a body on the line
+    else if (perp < 3) xg *= 0.85;
+  }
+  return xg;
+}
+
+function simCreate(opts) {
+  const { players, ball, attTeam, instr, seed } = opts;
+  const world = {
+    t: 0, rng: rngFrom(seed), instr, attTeam, defTeam: oppOf(attTeam),
+    players: players.map((p) => ({ ...p, vx: 0, vy: 0, target: { x: p.x, y: p.y }, speed: SIM.JOG, mode: 'shape', until: 0 })),
+    ball: { x: ball.x, y: ball.y, state: 'held', owner: null, lift: 0 },
+    nextDecide: 0.35, events: [], outcome: null, milestones: { final3: false, box: false }, frames: [],
+  };
+  const holder = world.players.filter((p) => p.team === attTeam).sort((a, b) => dist(a, ball) - dist(b, ball))[0];
+  world.ball.owner = holder;
+  world.ball.x = holder.x; world.ball.y = holder.y;
+  return world;
+}
+
+const simTeam = (w, team) => w.players.filter((p) => p.team === team);
+const sprintOf = (p) => (p.unit === 'G' ? SIM.GK_SPRINT : SIM.SPRINT);
+const timeToReach = (p, pt) => SIM.REACT + Math.max(0, dist(p, pt) - SIM.CONTROL_R) / sprintOf(p);
+function log(w, text, kind = '') { w.events.push({ t: w.t, text, kind }); }
+const tag = (p) => `${p.team === 'home' ? 'Blue' : 'Red'} #${p.num}`;
+
+// Offside line for attackers of `team`: second-last defender or the ball,
+// never behind halfway (in the attackers' depth coordinate).
+function simOffsideDepth(w, team) {
+  const depths = simTeam(w, oppOf(team)).map((p) => depthOf(team, p.x)).sort((a, b) => b - a);
+  return Math.max(depths[1] ?? 0, depthOf(team, w.ball.x), PITCH.L / 2);
+}
+
+// --- Where each player wants to be ---------------------------------------
+function defendTargets(w) {
+  const team = w.defTeam, ins = w.instr[team], ball = w.ball;
+  const ballU = depthOf(team, ball.x);                      // how far the ball is from our goal
+  const lineU = clamp(Math.min(LINE_DEPTH[ins.line], ballU - 6), 7, LINE_DEPTH[ins.line]);
+  const span = ins.width === 'narrow' ? 26 : 30;
+  const W = BLOCK_WIDTH[ins.width], cy = PITCH.W / 2 + (ball.y - PITCH.W / 2) * 0.55;
+  const attackers = simTeam(w, w.attTeam);
+  const defs = simTeam(w, team);
+  const carrier = ball.state === 'held' ? ball.owner : null;
+  // Pressing: nearest outfielder by time if the ball is inside our pressing zone.
+  const pressOn = ballU <= PRESS_ZONE[ins.press];
+  let presser = null, cover = null;
+  if (carrier && pressOn) {
+    const byTime = defs.filter((d) => d.unit !== 'G').sort((a, b) => timeToReach(a, carrier) - timeToReach(b, carrier));
+    presser = byTime[0]; cover = ins.press === 'high' ? byTime[1] : null;
+  }
+  const taken = new Set();
+  for (const d of defs) {
+    const [su, sy] = [d.slot[0], d.slot[1]];
+    if (d.unit === 'G') {
+      d.target = { x: xAtDepth(team, clamp(2 + lineU * 0.12, 2, 9)), y: PITCH.W / 2 + (ball.y - PITCH.W / 2) * 0.12 };
+      d.speed = SIM.JOG; d.mode = 'keeper';
+      continue;
+    }
+    // Block position: back line at lineU, other units stacked in front of it.
+    const u = lineU + clamp((su - 23) * (span / 36), 0, span);
+    let tgt = { x: xAtDepth(team, u), y: clamp(cy + (sy - 34) * (W / 54), 2, PITCH.W - 2) };
+    d.mode = 'shape'; d.speed = SIM.JOG;
+    if (d === presser) {
+      // Close down from the goal side, showing him away from goal.
+      const g = { x: xAtDepth(team, 0), y: PITCH.W / 2 }, k = 1.3 / Math.max(dist(carrier, g), 1);
+      tgt = { x: carrier.x + (g.x - carrier.x) * k, y: carrier.y + (g.y - carrier.y) * k };
+      d.mode = 'press'; d.speed = sprintOf(d);
+    } else if (d === cover) {
+      // Screen the nearest forward option.
+      const opt = attackers.filter((a) => a !== carrier && depthOf(w.attTeam, a.x) >= depthOf(w.attTeam, carrier.x) - 5)
+        .sort((a, b) => dist(a, carrier) - dist(b, carrier))[0];
+      if (opt) { tgt = { x: carrier.x + (opt.x - carrier.x) * 0.45, y: carrier.y + (opt.y - carrier.y) * 0.45 }; d.mode = 'cover'; d.speed = sprintOf(d); }
+    } else {
+      // Pick up anyone in or beyond our line near our zone: stay goal-side.
+      let mark = null, md = 9;
+      for (const a of attackers) {
+        if (a === carrier || taken.has(a)) continue;
+        // Defenders, or anyone with a runner level with or beyond our line,
+        // look 9 m for a man; midfielders otherwise only pick up within 6 m.
+        const behind = depthOf(team, a.x) < lineU + 3;
+        const dd = dist(a, tgt), range = behind || d.unit === 'D' ? 9 : 6;
+        if (dd < Math.min(md, range)) { md = dd; mark = a; }
+      }
+      if (mark) {
+        taken.add(mark);
+        const g = { x: xAtDepth(team, 0), y: PITCH.W / 2 }, k = 1.6 / Math.max(dist(mark, g), 1);
+        const goalSide = { x: mark.x + (g.x - mark.x) * k, y: mark.y + (g.y - mark.y) * k };
+        const running = mark.mode === 'run';
+        const mix = running ? 0.85 : d.unit === 'D' ? 0.55 : 0.4;
+        tgt = { x: tgt.x + (goalSide.x - tgt.x) * mix, y: tgt.y + (goalSide.y - tgt.y) * mix };
+        if (running) { d.mode = 'track'; d.speed = sprintOf(d); }
+      }
+    }
+    d.target = tgt;
+  }
+}
+
+function attackTargets(w) {
+  const team = w.attTeam, ins = w.instr[team], ball = w.ball, rng = w.rng;
+  const carrier = ball.state === 'held' ? ball.owner : null;
+  const ballV = depthOf(team, ball.x), offV = simOffsideDepth(w, team);
+  const spread = ins.attWidth === 'wide' ? 1.12 : 0.82;
+  const defs = simTeam(w, w.defTeam);
+  const pressure = carrier ? Math.min(...defs.map((d) => dist(d, carrier))) : 99;
+  const runRate = { few: 0.12, some: 0.3, many: 0.6 }[ins.runs];
+  const mates = simTeam(w, team).filter((p) => p !== carrier);
+  // Two nearest team-mates offer angles to the carrier.
+  const supporters = carrier ? mates.filter((p) => p.unit !== 'G').sort((a, b) => dist(a, carrier) - dist(b, carrier)).slice(0, 2) : [];
+  for (const p of mates) {
+    if (p.mode === 'run' && w.t < p.until) continue;         // keep running
+    if (p.mode === 'receive' && ball.state === 'flight') continue;   // keep going to the ball
+    const [su, sy] = p.slot;
+    if (p.unit === 'G') { p.target = { x: xAtDepth(team, 6), y: PITCH.W / 2 }; p.speed = SIM.JOG; p.mode = 'keeper'; continue; }
+    // Team shape moves up with the ball; nobody drifts offside.
+    let v = clamp(ballV + (su - 40) * 0.75, 4, offV - 0.8);
+    let tgt = { x: xAtDepth(team, v), y: clamp(PITCH.W / 2 + (sy - 34) * spread + (ball.y - PITCH.W / 2) * 0.2, 2, PITCH.W - 2) };
+    p.mode = 'shape'; p.speed = SIM.JOG;
+    if (supporters.includes(p)) {
+      // Best of six angles 10-14 m from the ball, away from defenders.
+      let best = null, bs = -Infinity;
+      for (let k = 0; k < 6; k++) {
+        const ang = (k / 6) * Math.PI * 2, r = 12;
+        const c = { x: clamp(carrier.x + Math.cos(ang) * r, 2, PITCH.L - 2), y: clamp(carrier.y + Math.sin(ang) * r, 2, PITCH.W - 2) };
+        if (depthOf(team, c.x) > offV - 0.8) continue;
+        const space = Math.min(...defs.map((d) => dist(d, c)));
+        const fwd = depthOf(team, c.x) - ballV;
+        const s = Math.min(space, 10) + fwd * 0.25 - dist(p, c) * 0.15;
+        if (s > bs) { bs = s; best = c; }
+      }
+      if (best) { tgt = best; p.speed = SIM.SPRINT * 0.85; p.mode = 'support'; }
+    } else if (carrier && ['A', 'AM', 'M'].includes(p.unit) && pressure > 4 && depthOf(team, p.x) > ballV - 5
+      && rng() < runRate * SIM.DECIDE_EVERY && Math.abs(depthOf(team, p.x) - offV) < 12) {
+      // Run in behind, starting onside, into the channel he's in.
+      const endV = clamp(offV + 8 + rng() * 6, 0, PITCH.L - 4);
+      tgt = { x: xAtDepth(team, endV), y: clamp(p.y + (PITCH.W / 2 - p.y) * 0.25, 4, PITCH.W - 4) };
+      p.mode = 'run'; p.speed = SIM.SPRINT; p.until = w.t + 2.6;
+      log(w, `${tag(p)} runs in behind`, 'run');
+    }
+    p.target = tgt;
+  }
+}
+
+// --- The carrier's choice --------------------------------------------------
+// Estimated chance a pass from `from` to `to` arrives with `rec`, judged
+// by who gets to points along its path first.
+function passOdds(w, from, to, rec, lofted) {
+  const d = dist(from, to);
+  const dur = lofted ? 0.6 + d / SIM.LOFT_V : 0.15 + d / SIM.GROUND_V;
+  const defs = simTeam(w, w.defTeam);
+  const fracs = lofted ? [0.9, 1] : [0.25, 0.5, 0.75, 1];
+  const tRec = SIM.REACT * 0.5 + Math.max(0, dist(rec, to) - SIM.CONTROL_R) / sprintOf(rec);
+  let keep = 1;
+  for (const q of defs) {
+    let worst = 0;
+    for (const f of fracs) {
+      const pt = { x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f };
+      const tBall = f === 1 ? Math.max(dur, tRec) : dur * f;
+      worst = Math.max(worst, sigmoid((tBall - timeToReach(q, pt)) / 0.18));
+    }
+    keep *= 1 - worst;
+  }
+  // Long passes are harder to hit.
+  keep *= lofted ? 0.8 : 1 - 0.006 * Math.max(0, d - 15);
+  return { p: keep, dur };
+}
+
+function carrierOptions(w, c) {
+  const team = w.attTeam, ins = w.instr[team];
+  const defs = simTeam(w, w.defTeam);
+  const cu = depthOf(team, c.x), offV = simOffsideDepth(w, team);
+  const riskAversion = { patient: 1.6, balanced: 1, direct: 0.6 }[ins.tempo];
+  const loseCost = (pt) => (0.9 * Math.exp(-depthOf(team, pt.x) / 14) * 0.7 + 0.015) * riskAversion;
+  const here = threatAt(team, c);
+  const opts = [];
+  for (const q of simTeam(w, team)) {
+    if (q === c) continue;
+    const lead = q.mode === 'run' ? 0.8 : 0.3;
+    const to = { x: clamp(q.x + q.vx * lead, 1, PITCH.L - 1), y: clamp(q.y + q.vy * lead, 1, PITCH.W - 1) };
+    const d = dist(c, to), gain = depthOf(team, to.x) - cu;
+    if (d < 5) continue;
+    let lofted = false;
+    if (d > SIM.GROUND_MAX) { if (d > SIM.LOFT_MAX || gain < 10) continue; lofted = true; }
+    if (gain < -4 && d > SIM.RECYCLE_MAX) continue;           // no long balls backwards
+    const odds = passOdds(w, c, to, q, lofted);
+    const space = Math.min(...defs.map((dd) => dist(dd, to)));
+    const value = threatAt(team, to) * (0.75 + 0.25 * Math.min(space, 8) / 8);
+    const offside = depthOf(team, q.x) > offV + 0.01 && depthOf(team, q.x) > PITCH.L / 2;
+    const u = odds.p * value - (1 - odds.p) * loseCost(to) - (offside ? 0.2 : 0);
+    opts.push({ kind: 'pass', to, rec: q, lofted, odds: odds.p, dur: odds.dur, u, gain, d });
+  }
+  // Carry it: up to five directions within 70° of straight at goal.
+  const pressure = Math.min(...defs.map((d) => dist(d, c)));
+  for (const a of [-70, -35, 0, 35, 70]) {
+    const base = team === 'home' ? 0 : Math.PI, ang = base + (a * Math.PI) / 180;
+    const end = { x: clamp(c.x + Math.cos(ang) * 5, 1, PITCH.L - 1), y: clamp(c.y + Math.sin(ang) * 5, 1, PITCH.W - 1) };
+    let closest = 99;
+    for (const q of defs) {
+      for (const f of [0.3, 0.6, 1]) closest = Math.min(closest, dist(q, { x: c.x + (end.x - c.x) * f, y: c.y + (end.y - c.y) * f }));
+    }
+    const keep = sigmoid((closest - 1.8) / 0.7);
+    opts.push({ kind: 'dribble', to: end, odds: keep, u: keep * threatAt(team, end) - (1 - keep) * loseCost(c) - 0.004 });
+  }
+  // Shoot when it's on.
+  const gx = team === 'home' ? PITCH.L : 0;
+  if (Math.hypot(gx - c.x, PITCH.W / 2 - c.y) < 30) {
+    const xg = shotXG(team, c, defs);
+    if (xg > 0.03) opts.push({ kind: 'shoot', xg, u: xg * 1.15 });
+  }
+  // A player under no pressure with nothing on keeps the ball.
+  if (pressure > 6) opts.push({ kind: 'hold', u: here * 0.9 });
+  return opts;
+}
+
+function chooseOption(w, opts) {
+  const temp = 0.015, best = Math.max(...opts.map((o) => o.u));
+  const weights = opts.map((o) => Math.exp((o.u - best) / temp));
+  let r = w.rng() * weights.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < opts.length; i++) { r -= weights[i]; if (r <= 0) return opts[i]; }
+  return opts[opts.length - 1];
+}
+
+function carrierDecides(w) {
+  const c = w.ball.owner;
+  const o = chooseOption(w, carrierOptions(w, c));
+  if (o.kind === 'pass') {
+    // Offside is judged the moment the ball is played.
+    const offV = simOffsideDepth(w, w.attTeam);
+    if (depthOf(w.attTeam, o.rec.x) > offV + 0.01 && depthOf(w.attTeam, o.rec.x) > PITCH.L / 2) {
+      log(w, `${tag(c)} finds ${tag(o.rec)}, but he's offside`, 'bad');
+      return simEnd(w, 'offside', o.rec);
+    }
+    Object.assign(w.ball, { state: 'flight', owner: null, from: { x: c.x, y: c.y }, to: o.to, t0: w.t, dur: o.dur, lofted: o.lofted, rec: o.rec, passer: c });
+    o.rec.target = o.to; o.rec.speed = sprintOf(o.rec); o.rec.mode = 'receive';
+    log(w, `${tag(c)} ${o.lofted ? 'lofts it' : o.gain < -3 ? 'plays it back' : 'passes'} to ${tag(o.rec)} (${o.d.toFixed(0)} m)`, 'pass');
+  } else if (o.kind === 'dribble') {
+    c.target = o.to; c.speed = SIM.DRIBBLE_V; c.mode = 'dribble';
+  } else if (o.kind === 'shoot') {
+    return shoot(w, c, o.xg);
+  } else {
+    c.target = { x: c.x, y: c.y }; c.speed = 1; c.mode = 'hold';
+  }
+}
+
+function shoot(w, c, xg) {
+  const r = w.rng();
+  const goalY = PITCH.W / 2 + (w.rng() - 0.5) * 6;
+  const gx = w.attTeam === 'home' ? PITCH.L + 0.8 : -0.8;
+  w.ball.shot = { from: { x: c.x, y: c.y }, to: { x: gx, y: goalY }, t0: w.t, dur: dist(c, { x: gx, y: goalY }) / 24 };
+  w.ball.state = 'shot'; w.ball.owner = null;
+  const result = r < xg ? 'goal' : r < xg + (1 - xg) * 0.45 ? 'saved' : r < xg + (1 - xg) * 0.75 ? 'blocked' : 'wide';
+  log(w, `${tag(c)} shoots from ${dist(c, { x: gx, y: PITCH.W / 2 }).toFixed(0)} m (xG ${xg.toFixed(2)}): ${{ goal: 'GOAL', saved: 'saved', blocked: 'blocked', wide: 'wide' }[result]}`, result === 'goal' ? 'goal' : 'shot');
+  w.pendingShot = { result, xg, at: { x: c.x, y: c.y } };
+}
+
+function simEnd(w, kind, who, at) {
+  w.outcome = { kind, t: w.t, at: at || { x: w.ball.x, y: w.ball.y }, who: who ? tag(who) : '', xg: w.pendingShot?.xg || 0, milestones: { ...w.milestones } };
+}
+
+// --- One tick ----------------------------------------------------------------
+function simStep(w) {
+  const dt = SIM.DT;
+  w.t += dt;
+  const ball = w.ball;
+  if (w.t >= w.nextDecide) {
+    w.nextDecide = w.t + SIM.DECIDE_EVERY;
+    defendTargets(w);
+    attackTargets(w);
+    if (ball.state === 'held' && ball.owner.team === w.attTeam) carrierDecides(w);
+    if (w.outcome) return;
+  }
+  // During a pass, the two defenders nearest the landing spot attack it.
+  if (ball.state === 'flight') {
+    const near = simTeam(w, w.defTeam).filter((d) => d.unit !== 'G').sort((a, b) => dist(a, ball.to) - dist(b, ball.to)).slice(0, 2);
+    for (const d of near) { d.target = ball.to; d.speed = sprintOf(d); }
+  }
+  // Move everyone towards their target with a speed and acceleration cap.
+  for (const p of w.players) {
+    const dx = p.target.x - p.x, dy = p.target.y - p.y, d = Math.hypot(dx, dy);
+    const want = d < 0.2 ? 0 : Math.min(p.speed, d / dt);
+    const tvx = d ? (dx / d) * want : 0, tvy = d ? (dy / d) * want : 0;
+    const ax = tvx - p.vx, ay = tvy - p.vy, a = Math.hypot(ax, ay), cap = SIM.ACCEL * dt;
+    const k = a > cap ? cap / a : 1;
+    p.vx += ax * k; p.vy += ay * k;
+    p.x = clamp(p.x + p.vx * dt, 0, PITCH.L); p.y = clamp(p.y + p.vy * dt, 0, PITCH.W);
+  }
+  if (ball.state === 'held') {
+    const c = ball.owner;
+    ball.x = c.x + attackDir(c.team) * 0.7; ball.y = c.y;
+    // Tackles: a defender touch-tight has a chance each tick.
+    for (const d of simTeam(w, oppOf(c.team))) {
+      if (dist(d, c) < SIM.TACKLE_R && w.rng() < 0.2) {
+        log(w, `${tag(d)} wins it off ${tag(c)}`, 'win');
+        return simEnd(w, 'turnover', d, { x: c.x, y: c.y });
+      }
+    }
+  } else if (ball.state === 'flight') {
+    const f = clamp((w.t - ball.t0) / ball.dur, 0, 1);
+    ball.x = ball.from.x + (ball.to.x - ball.from.x) * f; ball.y = ball.from.y + (ball.to.y - ball.from.y) * f;
+    ball.lift = ball.lofted ? Math.sin(Math.PI * f) : 0;
+    const catchable = !ball.lofted || f > 0.85;
+    if (catchable) {
+      for (const d of simTeam(w, w.defTeam)) {
+        if (dist(d, ball) < SIM.CONTROL_R) {
+          log(w, `${tag(d)} intercepts`, 'win');
+          return simEnd(w, 'turnover', d, { x: ball.x, y: ball.y });
+        }
+      }
+    }
+    if (f >= 1) {
+      // Whoever is closest to where it lands controls it.
+      const near = w.players.slice().sort((a, b) => dist(a, ball) - dist(b, ball))[0];
+      if (dist(near, ball) > 2.5 || near.team !== w.attTeam) {
+        log(w, near.team !== w.attTeam ? `${tag(near)} gets to it first` : 'The pass runs away from everyone', 'win');
+        return simEnd(w, 'turnover', near, { x: ball.x, y: ball.y });
+      }
+      ball.state = 'held'; ball.owner = near; ball.lift = 0;
+      near.mode = 'shape';
+      w.nextDecide = w.t + 0.35;                               // a touch to control it
+    }
+  } else if (ball.state === 'shot') {
+    const s = ball.shot, f = clamp((w.t - s.t0) / s.dur, 0, 1);
+    ball.x = s.from.x + (s.to.x - s.from.x) * f; ball.y = s.from.y + (s.to.y - s.from.y) * f;
+    if (f >= 1) return simEnd(w, w.pendingShot.result === 'goal' ? 'goal' : 'shot');
+  }
+  // Milestones for the attack.
+  if (ball.state === 'held') {
+    const u = depthOf(w.attTeam, ball.x);
+    if (u > 70 && !w.milestones.final3) { w.milestones.final3 = true; log(w, 'Into the final third', 'milestone'); }
+    const inBox = u > PITCH.L - PITCH.boxD && Math.abs(ball.y - PITCH.W / 2) < PITCH.boxW / 2;
+    if (inBox && !w.milestones.box) { w.milestones.box = true; log(w, 'Into the box', 'milestone'); }
+  }
+  if (w.t >= SIM.MAX_T) {
+    log(w, 'They keep the ball but go nowhere', 'end');
+    simEnd(w, 'held');
+  }
+}
+
+// Run one move to the end. With `record`, keep every frame for playback.
+function simRun(opts, record = false) {
+  const w = simCreate(opts);
+  const snap = () => w.frames.push({ t: w.t, p: w.players.map((p) => [p.x, p.y, p.mode]), b: [w.ball.x, w.ball.y, w.ball.lift || 0, w.ball.owner ? w.ball.owner.id : null] });
+  if (record) snap();
+  while (!w.outcome) { simStep(w); if (record) snap(); }
+  return w;
+}
+
+// Many runs with different seeds: the spread a coach actually needs.
+function simBatch(opts, n) {
+  const res = { n, goal: 0, shot: 0, box: 0, final3: 0, turnover: 0, offside: 0, held: 0, xg: 0, time: 0, marks: [] };
+  for (let i = 0; i < n; i++) {
+    const w = simRun({ ...opts, seed: (opts.seed || 1) * 7919 + i });
+    const o = w.outcome;
+    res[o.kind === 'goal' ? 'goal' : o.kind]++;
+    if (o.kind === 'goal') res.shot++;
+    if (o.milestones.box) res.box++;
+    if (o.milestones.final3) res.final3++;
+    res.xg += o.xg;
+    res.time += o.t;
+    res.marks.push({ kind: o.kind, x: o.at.x, y: o.at.y });
+  }
+  res.xg /= n; res.time /= n;
+  return res;
+}
+
+/* ================================================================
    Toolbar, toasts, shortcuts
    ================================================================ */
 function setTool(tool) {
@@ -2942,18 +3570,18 @@ function laneStats(lanes) {
 
 function updateReadout() {
   const h = A.homeShare * 100, c = A.carrier;
-  const shape = (s) => (s ? `${s.width.toFixed(0)} × ${s.depth.toFixed(0)} m · ${s.area.toFixed(0)} m²` : '—');
+  const shape = (s) => (s ? `${s.width.toFixed(0)}×${s.depth.toFixed(0)} m, ${s.area.toFixed(0)} m²` : '—');
   const ls = laneStats(A.lanes);
   setHTML($('#readout'), `
     <div class="bar" aria-hidden="true"><i style="width:${h}%;background:var(--home)"></i><i style="flex:1;background:var(--away)"></i></div>
     <dl class="stats">
-      <dt>Space controlled</dt><dd>Home ${h.toFixed(1)}% · Away ${(100 - h).toFixed(1)}%</dd>
+      <dt>Space owned</dt><dd>Blue ${h.toFixed(0)}% · Red ${(100 - h).toFixed(0)}%</dd>
       <dt>Ball</dt><dd>${c ? esc(who(c)) : `Loose (${state.possession} last)`}</dd>
       <dt>Lanes open</dt><dd>${c ? `${ls.open} of ${ls.total}` : '—'}</dd>
       <dt>Best line break</dt><dd>${ls.best ? `+${ls.best.breaks} to #${ls.best.to.num}` : '—'}</dd>
       <dt>Offside line</dt><dd>x = ${A.offsideX.toFixed(1)} m${A.offside.length ? ` · offside ${A.offside.map((p) => '#' + p.num).join(', ')}` : ''}</dd>
-      <dt>Home shape</dt><dd>${shape(A.shape.home)}</dd>
-      <dt>Away shape</dt><dd>${shape(A.shape.away)}</dd>
+      <dt>Blue shape</dt><dd>${shape(A.shape.home)}</dd>
+      <dt>Red shape</dt><dd>${shape(A.shape.away)}</dd>
     </dl>`);
 
   const s = A.selected;
@@ -2984,7 +3612,7 @@ for (const cb of document.querySelectorAll('[data-layer]')) cb.addEventListener(
 function syncLayers() {
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === state.view));
   const vb = $('#view-btn .wide');
-  if (vb) vb.textContent = ` ${VIEWS[state.view]?.label || 'Custom'}`;
+  if (vb) vb.textContent = `: ${VIEWS[state.view]?.label || 'Custom'}`;
   for (const b of document.querySelectorAll('[data-cov]')) b.setAttribute('aria-pressed', String(b.dataset.cov === state.coverage));
   for (const cb of document.querySelectorAll('[data-layer]')) cb.checked = state.layers[cb.dataset.layer];
 }
@@ -3021,26 +3649,45 @@ $('#saved-list').addEventListener('click', (ev) => {
 });
 renderSaved();
 
-// Panel sheet (narrow screens) and first-run welcome
+// Modes and the Board drawer. On wide landscape screens the drawer sits
+// beside the pitch; otherwise it is a bottom sheet toggled from the top bar.
+const isNarrow = () => !matchMedia('(min-width: 900px) and (orientation: landscape)').matches;
+let panelOpen = !isNarrow();
+function syncPanel() {
+  const show = appMode === 'board' && panelOpen;
+  $('#panel').hidden = !show;
+  $('#panel-open').hidden = appMode !== 'board';
+  $('#panel-open').setAttribute('aria-expanded', String(show));
+  $('#panel-open').textContent = show ? 'Close panel' : 'Panel';
+}
 function setPanel(open) {
-  $('#panel').classList.toggle('open', open);
-  $('#panel-open').setAttribute('aria-expanded', String(open));
+  if (!open && !isNarrow()) return;      // the side drawer stays put on wide screens
+  panelOpen = open;
+  syncPanel();
 }
-$('#panel-open').addEventListener('click', () => setPanel(!$('#panel').classList.contains('open')));
-$('#panel-close').addEventListener('click', () => setPanel(false));
-const HINT_KEY = 'tacticsLab.hintDismissed';
-$('#welcome').hidden = !!store.get(HINT_KEY, false);
-const closeWelcome = () => { $('#welcome').hidden = true; store.set(HINT_KEY, true); };
-$('#w-board').addEventListener('click', closeWelcome);
-$('#w-match').addEventListener('click', () => { closeWelcome(); quickMatch(); });
-$('#welcome').addEventListener('click', (ev) => { if (ev.target.id === 'welcome') closeWelcome(); });
+$('#panel-open').addEventListener('click', () => { panelOpen = !panelOpen; syncPanel(); });
 
-function quickMatch() {
-  if (anim || state.match) return;
-  setPanel(false);
-  startFromModel(`${PRESETS[matchPreset].name}. ${PRESETS[matchPreset].desc}`, PRESETS[matchPreset]);
+function setMode(mode) {
+  if (anim) return;
+  if (mode === 'board' && state.match) exitMatch();
+  appMode = mode;
+  store.set('tacticsLab.mode', mode);
+  $('#mode-play').setAttribute('aria-pressed', String(mode === 'play'));
+  $('#mode-board').setAttribute('aria-pressed', String(mode === 'board'));
+  if (mode === 'board') setTool(state.tool || 'move');
+  syncPanel();
+  renderMatchUI();
+  requestRender();
 }
-$('#match-quick').addEventListener('click', quickMatch);
+$('#mode-play').addEventListener('click', () => setMode('play'));
+$('#mode-board').addEventListener('click', () => setMode('board'));
+
+for (const b of document.querySelectorAll('[data-tab]')) {
+  b.addEventListener('click', () => {
+    for (const t of document.querySelectorAll('[data-tab]')) t.setAttribute('aria-selected', String(t === b));
+    for (const pane of document.querySelectorAll('[data-pane]')) pane.hidden = pane.dataset.pane !== b.dataset.tab;
+  });
+}
 $('#view-btn').addEventListener('click', cycleView);
 
 /* ================================================================
@@ -3052,6 +3699,7 @@ function requestRender() {
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
+    stepTweens();
     analyse();
     drawPitch();
     if (state.coverage === 'control' && !state.match) drawControl();
@@ -3073,27 +3721,14 @@ function requestRender() {
   });
 }
 
-// Theme: auto follows the OS; light/dark force it via data-theme.
-const THEME_KEY = 'tacticsLab.theme';
-function applyTheme(t) {
-  if (t === 'auto') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = t;
-  $('#theme').textContent = { auto: 'Auto', light: 'Light', dark: 'Dark' }[t];
-  readTokens(); renderBackground(); requestRender();
-}
-let theme = store.get(THEME_KEY, 'auto');
-if (!['auto', 'light', 'dark'].includes(theme)) theme = 'auto';
-$('#theme').addEventListener('click', () => {
-  theme = { auto: 'light', light: 'dark', dark: 'auto' }[theme];
-  store.set(THEME_KEY, theme);
-  applyTheme(theme);
-});
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(theme));
-document.fonts?.ready.then(() => requestRender());
+// One dark palette on purpose (a night match), so tokens are read once.
+readTokens();
+renderBackground();
+document.fonts?.ready.then(() => { renderBackground(); requestRender(); });
 
-applyTheme(theme);
 if (!restore(store.get(BOARD_KEY, null))) setupMatch('4-3-3', '4-4-2');
 syncControls();
+setMode(store.get('tacticsLab.mode', 'play') === 'board' ? 'board' : 'play');
 
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
@@ -3105,5 +3740,3 @@ function watchDpr() {
 }
 watchDpr();
 </script>
-</body>
-</html>

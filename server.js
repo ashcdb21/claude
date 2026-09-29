@@ -151,7 +151,10 @@ function serveStatic(req, res) {
       return res.end('Not found');
     }
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(filePath)] || 'application/octet-stream' });
-    res.end(req.method === 'HEAD' ? undefined : data);
+    // index.html is authored without a doctype so the same file can be published as an
+    // artifact (which supplies its own); add one here so local serving uses standards mode.
+    const body = rel === 'index.html' ? Buffer.concat([Buffer.from('<!doctype html>\n'), data]) : data;
+    res.end(req.method === 'HEAD' ? undefined : body);
   });
 }
 

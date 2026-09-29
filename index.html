@@ -2807,7 +2807,8 @@ function selectNone() { state.selected = null; state.pendingPass = null; }
 function labTick(now) {
   const pl = lab.play;
   if (!pl) return;
-  const frames = pl.w.frames, t = ((now - pl.t0) / 1000) * pl.speed;
+  // The frame timestamp can be slightly earlier than the moment playback started.
+  const frames = pl.w.frames, t = Math.max(0, ((now - pl.t0) / 1000) * pl.speed);
   const i = Math.min(frames.length - 1, Math.floor(t / SIM.DT)), k = Math.min(1, t / SIM.DT - i);
   const a = frames[i], b = frames[Math.min(frames.length - 1, i + 1)];
   // Interpolate between recorded frames for smooth motion.

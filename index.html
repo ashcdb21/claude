@@ -266,6 +266,8 @@
   @media (max-width: 899px), (orientation: portrait) {
     #panel, #side { position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-height: 72%; border-left: 0; border-top: 1px solid var(--line-soft);
       border-radius: 16px 16px 0 0; box-shadow: 0 -12px 40px rgba(0,0,0,.5); }
+    #side { max-height: 62%; }
+    #stage.in-match #ticker { top: 58px; }
     .tile .v { font-size: 26px; }
   }
   @media (prefers-reduced-motion: reduce) { #flash, #ticker { animation: none !important; transition: none !important; } }
@@ -3177,7 +3179,7 @@ function options(w, c) {
     }
   }
   // Crosses and cut-backs from wide in the final third.
-  if (!isGK && cu > 66 && Math.abs(c.y - MID) > 12) addCrosses(w, c, opts, lossAt, R, ins);
+  if (!isGK && cu > 72 && Math.abs(c.y - MID) > 12) addCrosses(w, c, opts, lossAt, R, ins);
   if (!isGK) {
     // Carry it: five directions within 70° of straight at goal.
     const dk = DRIB_K[ins.dribbling] * (1 + (R.dribble || 0));
@@ -3244,7 +3246,8 @@ function addCrosses(w, c, opts, lossAt, R, ins) {
       if (t < qt) { qt = t; q = m; }
     }
     const d = hyp(to.x - c.x, to.y - c.y);
-    if (!q || d < 8) continue;
+    // Nobody to aim at: no cross.
+    if (!q || d < 8 || hyp(q.x - to.x, q.y - to.y) > 16) continue;
     if (depthOf(team, q.x) + gauss(w.rng) * 0.8 > offsideDepth(w, team) + 0.2) continue;   // he'd be offside
     if (air) {
       const T = airFlight(d).T;
@@ -4188,7 +4191,7 @@ const CAUSE_LABEL = { inBehind: 'balls in behind', pressBeaten: 'playing through
   overload: 'overloads out wide', switch: 'switches of play', dribblePast: 'beating a man one-on-one', timeOnBall: 'time on the ball outside the box', crossWon: 'crosses',
   rebound: 'rebounds', regainHigh: 'winning it high', counterPress: 'the counter-press', restExposed: 'counter-attacks', penalty: 'penalties', settled: 'patient build-up' };
 
-function insights(agg, teams, sit) {
+function insights(agg, teams, sit, unit = 'runs') {
   const n = agg.n || 1, out = [];
   const ins = teams.home.tactic.instr, roles = teams.home.tactic.roles, form = FORMATIONS[teams.home.tactic.formation];
   const M = metricsOf(agg);
@@ -4217,11 +4220,18 @@ function insights(agg, teams, sit) {
       const fb = [...roleAt('FB'), ...roleAt('WB')].filter((q) => q.r === 'wb');
       if (fb.length) fixes.push(roleFix(fb[0].i, 'ifb'));
       const dm = roleAt('DM'); if (dm.length && !dm.some((q) => ['anchor', 'hb'].includes(q.r))) fixes.push(roleFix(dm[0].i, 'anchor'));
-    } else if (c1 === 'overload' || c1 === 'crossWon' || c1 === 'dribblePast') {
+    } else if (c1 === 'overload' || c1 === 'crossWon') {
+      // Stop the cross at source: cover the flank, don't dive in, win what comes in.
+      fixes.push(ins.compact !== 'wide' ? fix('compact', ins.compact === 'narrow' ? 'normal' : 'wide') : null);
+      fixes.push(ins.press === 'more' || ins.tackling === 'hard' ? fix(ins.press === 'more' ? 'press' : 'tackling', 'normal') : null);
+      const wm = roleAt('WM').filter((q) => (ROLES[q.r].track ?? 1) < 1.2);
+      if (wm.length) fixes.push(roleFix(wm[0].i, 'dw'));
+      fixes.push(ins.marking !== 'tight' ? fix('marking', 'tight') : null);
+    } else if (c1 === 'dribblePast') {
+      fixes.push(ins.tackling === 'hard' ? fix('tackling', 'normal') : ins.press === 'more' ? fix('press', 'normal') : null);
       fixes.push(ins.compact === 'narrow' ? fix('compact', 'normal') : null);
-      const wm = [...roleAt('WM'), ...roleAt('W')].filter((q) => (ROLES[q.r].track ?? 1) < 1);
-      if (wm.length) fixes.push(roleFix(wm[0].i, wm[0].g === 'WM' ? 'dw' : 'iw'));
-      fixes.push(ins.tackling === 'hard' ? fix('tackling', 'normal') : null);
+      const wm = roleAt('WM').filter((q) => (ROLES[q.r].track ?? 1) < 1.2);
+      if (wm.length) fixes.push(roleFix(wm[0].i, 'dw'));
     } else if (c1 === 'switch') {
       fixes.push(ins.compact === 'narrow' ? fix('compact', 'normal') : fix('compact', 'wide'));
     } else if (c1 === 'timeOnBall') {
@@ -4235,13 +4245,13 @@ function insights(agg, teams, sit) {
   const exposed = runs('restExposed:away');
   if (exposed >= n * 0.2 && !out.some((o) => o.title.includes('counter-attacks'))) {
     const fb = [...roleAt('FB'), ...roleAt('WB')].filter((q) => q.r === 'wb' || q.r === 'fb');
-    out.push({ tone: 'bad', title: 'Caught short when you lose it', text: `In ${exposed} of ${n} runs you lost the ball with as many of them ahead of it as you had behind it. ${MOMENT_INFO.restExposed.principle}`,
+    out.push({ tone: 'bad', title: 'Caught short when you lose it', text: `In ${exposed} of ${n} ${unit} you lost the ball with as many of them ahead of it as you had behind it. ${MOMENT_INFO.restExposed.principle}`,
       fixes: [ins.onLoss !== 'counterpress' ? fix('onLoss', 'counterpress') : null, fb.length ? roleFix(fb[0].i, 'dfb') : null].filter(Boolean) });
   }
   // Losing it at the back.
   if (M.lostOwnThird >= 25) {
     const gk = roleAt('GK')[0];
-    out.push({ tone: 'bad', title: 'Losing it near your own goal', text: `You lost the ball in your own third in ${Math.round(M.lostOwnThird)}% of runs. Playing out needs angles and nerve; going long gives it away further from goal.`,
+    out.push({ tone: 'bad', title: 'Losing it near your own goal', text: `You lost the ball in your own third in ${Math.round(M.lostOwnThird)}% of ${unit}. Playing out needs angles and nerve; going long gives it away further from goal.`,
       fixes: [ins.buildUp !== 'long' ? fix('buildUp', 'long') : fix('buildUp', 'mixed'), roleAt('DM').length && !roleAt('DM').some((q) => q.r === 'hb') ? roleFix(roleAt('DM')[0].i, 'hb') : null, gk && roles[gk.i] !== 'sk' ? roleFix(gk.i, 'sk') : null].filter(Boolean).slice(0, 3) });
   }
   // Our shots: what worked, and whether they were good ones.
@@ -4254,7 +4264,7 @@ function insights(agg, teams, sit) {
     if (q < 0.075) out.push({ tone: 'bad', title: 'Low-quality shots', text: `Your shots averaged ${q.toFixed(2)} xG: too many from distance. Working it into the box gives fewer but much better chances.`,
       fixes: [ins.final !== 'workIn' ? fix('final', 'workIn') : null, ins.runs !== 'many' ? fix('runs', 'many') : null].filter(Boolean) });
   }
-  if (M.offsideFor >= 15) out.push({ tone: 'bad', title: 'Runners caught offside', text: `Your runners were flagged in ${Math.round(M.offsideFor)}% of runs. Fewer, better-timed runs waste fewer attacks.`, fixes: [ins.runs === 'many' ? fix('runs', 'some') : fix('runs', 'few')].filter(Boolean) });
+  if (M.offsideFor >= 15) out.push({ tone: 'bad', title: 'Runners caught offside', text: `Your runners were flagged in ${Math.round(M.offsideFor)}% of ${unit}. Fewer, better-timed runs waste fewer attacks.`, fixes: [ins.runs === 'many' ? fix('runs', 'some') : fix('runs', 'few')].filter(Boolean) });
   // Situation-specific reads.
   if (sit.id === 'press' && M.winHigh < 25) out.push({ tone: 'bad', title: 'The press is not winning it', text: `You won it back in their half in only ${Math.round(M.winHigh)}% of runs.`,
     fixes: [ins.engage !== 'high' ? fix('engage', 'high') : null, ins.press !== 'more' ? fix('press', 'more') : null, ins.line === 'deep' ? fix('line', 'standard') : ins.line === 'standard' ? fix('line', 'high') : null].filter(Boolean).slice(0, 3) });
@@ -4359,14 +4369,14 @@ const LESSONS = [
     levers: ['onWin', 'tempo', 'passing', 'runs', 'dribbling'], roleLevers: ['ST', 'W'],
     idea: 'The seconds after winning the ball are when the opponent is least organised. Go forward immediately, before they can recover their shape.',
     task: 'You win it on halfway while Castello are attacking. Get a shot away.',
-    goals: [{ key: 'shotFor', op: '>=', v: 40 }, { key: 'box', op: '>=', v: 35 }, { key: 'shotFor', op: '>=', v: 50 }],
+    goals: [{ key: 'shotFor', op: '>=', v: 40 }, { key: 'box', op: '>=', v: 35 }, { key: 'shotFor', op: '>=', v: 47 }],
     hints: ['What does your team do the moment it wins the ball?', 'Keeping it and waiting gives them three seconds to get back.', 'Once you go, go forward: the first pass decides the counter.'],
     debrief: 'A counter lives on the first seconds: forward passes into runners while their shape is broken. Holding the ball, however safely, lets them recover.' },
   { id: 'edge', title: 'Defend the edge of the box', sit: 'edge', opp: 'rheinfeld', style: 'balanced', set: { press: 'less', marking: 'zonal', compact: 'wide' },
     levers: ['press', 'tackling', 'marking', 'compact', 'line'],
     idea: 'Near your own box, time on the ball is a chance. Someone must step out to the ball straight away, and the others must be close enough to help.',
     task: 'Rheinfeld have it 27 m out with runners around your box. Stop the shot.',
-    goals: [{ key: 'shotAg', op: '<=', v: 40 }, { key: 'xgAg', op: '<=', v: 0.04 }, { key: 'shotAg', op: '<=', v: 26 }],
+    goals: [{ key: 'shotAg', op: '<=', v: 40 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 26 }],
     hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'Winning the ball cleanly ends the danger; standing off invites the shot.'],
     debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. Tackling hard helps here too, but it is a gamble inside the area.' },
   { id: 'wide', title: 'Stop the cross', sit: 'theirwide', opp: 'kingsbridge', style: 'balanced', set: { compact: 'narrow', tackling: 'hard', press: 'normal' },
@@ -5019,6 +5029,7 @@ function watchItem(i) {
 function renderScorebug() {
   const el = $('#scorebug');
   el.hidden = appMode !== 'match' || match.phase === 'pre';
+  $('#stage').classList.toggle('in-match', !el.hidden);
   if (el.hidden) return;
   setHTML(el, `<span class="dot home"></span><span class="sc">${match.score.home}–${match.score.away}</span><span class="dot away"></span><span class="min">${match.phase === 'ft' ? 'FT' : match.phase === 'ht' ? 'HT' : `${match.minute}’`}</span>`);
 }
@@ -5035,7 +5046,7 @@ function matchStats(which) {
 function matchReport(half) {
   const h = match.halves[half - 1];
   if (!h) return '';
-  const qs = insights(h.agg, h.teams, { id: 'match' }).filter((q) => q.tone === 'bad' || q.tone === 'good').slice(0, 3);
+  const qs = insights(h.agg, h.teams, { id: 'match' }, 'moments').filter((q) => q.tone === 'bad' || q.tone === 'good').slice(0, 3);
   if (!qs.length) return '<p class="muted small">Nothing stood out: the game is even on the patterns that matter.</p>';
   return qs.map((q) => `<div class="card ${q.tone}"><b>${esc(q.title)}</b><p class="small">${esc(q.text)}</p>${q.fixes.length ? `<p class="small muted">Worth trying: ${q.fixes.map((f) => esc(f.label)).join('; ')}.</p>` : ''}</div>`).join('');
 }

@@ -1587,6 +1587,8 @@ function endDrag(ev) {
   }
   const done = drag;
   drag = null;
+  // Coaching screens remember who you placed by hand.
+  if ((appMode === 'lab' || appMode === 'lessons') && (done.kind === 'player' || done.kind === 'ball')) lab.moved.add(done.kind === 'ball' ? 'ball' : done.target.id);
   if (done.kind === 'pass' && done.to) commitPass(done.passer, done.to);
   canvas.style.cursor = ev.pointerType === 'mouse' && hitTest(pointerPitch(ev)) ? 'grab' : 'default';
   requestRender();
@@ -4661,6 +4663,7 @@ function focusMoment(m) { if (m) seek(Math.max(0, m.t - 0.2), m); }
    ================================================================ */
 const lab = {
   sit: 0, setupT: false, result: null, pinned: null, marks: [], busy: false, progress: 0, insights: [], coachNote: '', coachBusy: false, showSpace: false,
+  moved: new Set(), saved: null,
   get play() { return replay.w ? replay : null; },
 };
 const LAB_KEY = 'tacticsLab.lab.v2';
@@ -4678,6 +4681,7 @@ function loadSituation(i, keepResults = false) {
   const teams = labTeams(), sit = labSit();
   const setup = engSetup(teams, sit);
   placeSetup(teams, setup);
+  lab.moved = new Set();
   lab.setupT = !!sit.transition;
   replay.start = null;
   if (!keepResults) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; lab.coachNote = ''; }
@@ -4686,8 +4690,23 @@ function loadSituation(i, keepResults = false) {
   renderSide();
   requestRender();
 }
-// Tactics changed: rebuild the starting picture from the new shapes.
-const refreshSituation = () => loadSituation(lab.sit, true);
+// Tactics changed: move the side whose tactic changed into its new shape,
+// but leave everyone you have placed by hand, and the other side, where
+// they are.
+function refreshSituation(changed = null) {
+  if (replay.w) clearReplay(true);
+  const teams = labTeams(), setup = engSetup(teams, labSit());
+  const labels = { home: teams.home, away: teams.away };
+  for (const p of state.players) {
+    const i = slotOf(p), tm = labels[p.team];
+    p.tag = ROLES[tm.tactic.roles[i]]?.short || p.role;
+    p.name = tm.lineup[i]?.name || p.name;
+    if (lab.moved?.has(p.id) || (changed && p.team !== changed)) continue;
+    [p.x, p.y] = setup.pos[p.team][i];
+  }
+  renderSide();
+  requestRender();
+}
 
 function labWatch() {
   if (lab.busy || anim) return;
@@ -4730,7 +4749,7 @@ function tryFix(f) {
   if (f.key) setInstr(src, f.team, f.key, f.value);
   else if (f.role) setRole(src, f.team, f.slot, f.role);
   toast(`Testing: ${f.label}`);
-  refreshSituation();
+  refreshSituation(f.team);
   labTest();
 }
 
@@ -5111,7 +5130,7 @@ $('#side').addEventListener('click', (ev) => {
     const [team, key] = d.instr.split('.');
     setInstr(appMode === 'tactics' ? club : labSrc(), team, key, d.v);
     tac.help = { key, v: d.v };
-    if (appMode === 'tactics') showShape(); else refreshSituation();
+    if (appMode === 'tactics') showShape(); else refreshSituation(team);
     renderSide();
   } else if (d.moment != null) focusMoment(replay.key[+d.moment]);
   else if (d.fix) { const [i, j] = d.fix.split('.').map(Number); tryFix(lab.insights[i].fixes[j]); }
@@ -5143,12 +5162,12 @@ $('#side').addEventListener('change', (ev) => {
   if (t.id === 'sit-select') loadSituation(+t.value);
   else if (t.id === 'opp-select') {
     club.oppId = t.value; club.them = opponentTeam(t.value); saveClub();
-    if (appMode === 'tactics') showShape(); else if (appMode === 'lab') refreshSituation();
+    if (appMode === 'tactics') showShape(); else if (appMode === 'lab') refreshSituation('away');
     renderSide();
   } else if (t.dataset.role) {
     const [team, slot] = t.dataset.role.split('.');
     setRole(appMode === 'tactics' ? club : labSrc(), team, +slot, t.value);
-    if (appMode === 'tactics') showShape(); else refreshSituation();
+    if (appMode === 'tactics') showShape(); else refreshSituation(team);
     renderSide();
   } else if (t.id === 'tac-formation') {
     setFormationOf(club, tac.team, t.value); tac.sel = null;
@@ -5166,7 +5185,12 @@ $('#side').addEventListener('submit', (ev) => {
 });
 $('#lab-watch').addEventListener('click', labWatch);
 $('#lab-test').addEventListener('click', labTest);
-$('#lab-reset').addEventListener('click', () => { if (!lab.busy) { clearReplay(false); loadSituation(lab.sit, true); } });
+// Reset: after a replay, back to your starting picture; press again for the default one.
+$('#lab-reset').addEventListener('click', () => {
+  if (lab.busy) return;
+  if (replay.w) { clearReplay(true); toast(lab.moved.size ? 'Back to your set-up. Reset again for the default positions' : 'Back to the start'); }
+  else { loadSituation(lab.sit, true); toast('Default starting positions'); }
+});
 $('#lab-speed').addEventListener('click', () => { replay.speed = replay.speed === 1 ? 2 : 1; saveLab(); syncBars(); });
 $('#lab-space').addEventListener('click', () => { lab.showSpace = !lab.showSpace; syncBars(); requestRender(); });
 for (const b of document.querySelectorAll('[data-phase]')) b.addEventListener('click', () => { tac.phase = b.dataset.phase; showShape(); renderSide(); syncBars(); });
@@ -5463,7 +5487,7 @@ function setMode(mode, init = false) {
   clearReplay(false);
   $('#ticker').className = '';
   // The lab and the lessons each keep their own situation and results.
-  if (prev === 'lab') labSitSaved = lab.sit;
+  if (prev === 'lab') { labSitSaved = lab.sit; lab.saved = { start: saveStart(), moved: lab.moved, forms: { ...state.formations } }; }
   if ((prev === 'lab' && mode === 'lessons') || (prev === 'lessons' && mode === 'lab')) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; }
   appMode = mode;
   showOnly = null;
@@ -5473,7 +5497,14 @@ function setMode(mode, init = false) {
   setTool(mode === 'board' ? state.tool || 'move' : 'move');
   if (mode === 'board') { if (!restore(boardSnap || store.get(BOARD_KEY, null))) setupMatch('4-3-3', '4-4-2'); }
   else if (mode === 'tactics') { showOnly = tac.team; showShape(); }
-  else if (mode === 'lab') { if (labSitSaved != null) lab.sit = labSitSaved; loadSituation(lab.sit, true); }
+  else if (mode === 'lab') {
+    const same = labSitSaved == null || labSitSaved === lab.sit;
+    if (labSitSaved != null) lab.sit = labSitSaved;
+    // Coming back to the same situation you set up: keep your positions, reshape the rest.
+    const s0 = lab.saved;
+    if (same && s0?.moved.size && prev === 'tactics' && s0.forms.home === club.us.tactic.formation && s0.forms.away === club.them.tactic.formation) { const s = s0; loadSituation(lab.sit, true); if (s) { restoreStart(s.start); lab.moved = s.moved; refreshSituation(); } }
+    else loadSituation(lab.sit, true);
+  }
   else if (mode === 'lessons') { if (lesson.id) loadSituation(lab.sit, true); else showLessonPreview(); }
   else if (mode === 'match') {
     const it = match.items[match.current];

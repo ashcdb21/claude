@@ -85,6 +85,8 @@
   .bar .go { background: var(--armband); color: var(--armband-ink); padding: 12px 24px; font-size: 21px; }
   .bar .go:disabled, .bar button:disabled { opacity: .45; cursor: default; }
   .bar .ghost { color: var(--muted); }
+  .bar .bs { display: none; }
+  @media (max-width: 480px) { .bar .bl { display: none; } .bar .bs { display: inline; } }
   @media (max-width: 480px) { .bar { gap: 2px; padding: 5px; } .bar button { padding: 10px 8px; font-size: 16px; } .bar .go { padding: 12px 16px; } .bar .wide { display: none; }
     .tabs button { font-size: 14px; letter-spacing: .04em; } }
 
@@ -115,6 +117,16 @@
   #flash.win { background: radial-gradient(circle, transparent 35%, rgba(74,222,128,.4)); animation: flash .9s ease-out; }
   @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 
+  #ordermenu { position: absolute; z-index: 4; display: flex; flex-wrap: wrap; gap: 4px; max-width: 250px; padding: 8px; border-radius: 12px;
+    background: rgba(12,20,16,0.94); border: 1px solid var(--line-soft); box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+  #ordermenu .t { width: 100%; font: 700 13px var(--body); color: var(--ink, #fff); margin: 0 2px 4px; }
+  #ordermenu button { border: 1px solid var(--line-soft); background: var(--surface-2); color: inherit; font: 600 13px var(--body); padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+  #ordermenu button.gold { border-color: var(--select); color: var(--select); }
+  #ordermenu button[aria-pressed="true"] { background: var(--select); color: #111; }
+  .plan-list { display: grid; gap: 6px; }
+  .plan-list .po { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--select); }
+  .plan-list .po .res { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+  .plan-list .po .res.ok { color: var(--good); } .plan-list .po .res.no { color: var(--bad); }
   #ticker { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 24px);
     padding: 8px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line-soft);
     font: 800 18px/1.15 var(--display); letter-spacing: .03em; text-transform: uppercase; text-align: center;
@@ -311,6 +323,7 @@
     <main id="stage">
       <div id="board"><canvas id="pitch" aria-label="Tactics board"></canvas></div>
       <div id="ticker" aria-live="polite"></div>
+      <div id="ordermenu" hidden></div>
       <div id="scorebug" hidden></div>
       <div id="flash"></div>
       <div id="toast" role="status" aria-live="polite"></div>
@@ -320,12 +333,13 @@
         <span id="tl-time">0.0 s</span>
       </div>
       <nav id="labbar" class="bar" hidden aria-label="Lab controls">
-        <button class="ghost" id="lab-reset" title="Back to the starting picture">Reset</button>
-        <button id="lab-watch" title="Watch one run (Space)">▶ Watch</button>
+        <button class="ghost" id="lab-reset" title="Back to the starting picture" aria-label="Reset"><span class="bl">Reset</span><span class="bs">↺</span></button>
+        <button id="lab-watch" title="Watch one run (Space)" aria-label="Watch one run">▶<span class="bl"> Watch</span></button>
         <button class="go" id="lab-test">Test 100×</button>
-        <button class="ghost" id="lab-plan" aria-pressed="true" title="Show pressing, lanes being cut and runs during a replay">Plan</button>
+        <button class="ghost" id="lab-plan" aria-pressed="true" title="During a replay, show each player's job: pressing, cutting a lane, marking, running">Jobs</button>
         <button class="ghost wide" id="lab-space" aria-pressed="false" title="Show who controls the space">Space</button>
         <button class="ghost" id="lab-speed" title="Playback speed">1×</button>
+        <button class="ghost" id="lab-cam" aria-pressed="true" title="Camera: follow the action, or show the whole pitch">Zoom</button>
       </nav>
       <nav id="tacbar" class="bar" hidden aria-label="Tactics view">
         <span class="seg" id="tac-phase"><button data-phase="ip" aria-pressed="true">With the ball</button><button data-phase="oop" aria-pressed="false">Without it</button></span>
@@ -333,6 +347,7 @@
       <nav id="matchbar" class="bar" hidden aria-label="Match controls">
         <button class="go" id="match-go">Kick off</button>
         <button class="ghost" id="match-skip" hidden>Skip</button>
+        <button class="ghost" id="match-cam" aria-pressed="true" title="Camera: follow the action, or show the whole pitch">Zoom</button>
       </nav>
       <nav id="toolbar" class="bar" role="toolbar" aria-label="Board tools" hidden>
         <button data-tool="move" aria-pressed="true" title="Move (V)">Move</button>
@@ -931,7 +946,53 @@ function analyse(full = true) {
    ================================================================ */
 const canvas = document.getElementById('pitch');
 let ctx = canvas.getContext('2d');   // swapped to the background canvas while it is rebuilt
-const view = { s: 1, a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, portrait: false, dpr: 1, cssW: 0, cssH: 0 };
+const view = { s: 1, s0: 1, a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, portrait: false, dpr: 1, cssW: 0, cssH: 0 };
+// The camera: the pitch point at the centre of the screen and a zoom (1 =
+// the whole pitch). `cam` is where it is, `camGoal` where it is heading; the
+// coaching screens move it to frame the action, the board keeps it at 1.
+const cam = { x: PITCH.L / 2, y: PITCH.W / 2, z: 1 };
+const camGoal = { x: PITCH.L / 2, y: PITCH.W / 2, z: 1 };
+const CAM_MAX = 2.6;
+// How many metres of pitch fit across the screen's width and height at a zoom.
+function camSpan(z) {
+  const w = view.cssW / (view.s0 * z), h = view.cssH / (view.s0 * z);
+  return view.portrait ? { x: h, y: w } : { x: w, y: h };    // along the pitch's length (x) and width (y)
+}
+// Keep the frame on the pitch (plus its margin).
+function clampCam(c) {
+  c.z = clamp(c.z, 1, CAM_MAX);
+  const sp = camSpan(c.z);
+  const fit = (v, half, lo, hi) => (half * 2 >= hi - lo ? (lo + hi) / 2 : clamp(v, lo + half, hi - half));
+  c.x = fit(c.x, sp.x / 2, -MARGIN, PITCH.L + MARGIN);
+  c.y = fit(c.y, sp.y / 2, -MARGIN, PITCH.W + MARGIN);
+  return c;
+}
+function applyCamera() {
+  clampCam(cam);
+  const s = view.s0 * cam.z;
+  view.s = s;
+  const cx = view.cssW / 2, cy = view.cssH / 2;
+  if (view.portrait) Object.assign(view, { a: 0, b: -s, c: s, d: 0, e: cx - cam.y * s, f: cy + cam.x * s });
+  else Object.assign(view, { a: s, b: 0, c: 0, d: s, e: cx - cam.x * s, f: cy - cam.y * s });
+}
+// Ease the camera towards its goal; true while it is still moving.
+let camLast = 0;
+function stepCamera(now, snap = false) {
+  const dt = camLast ? Math.min(0.1, (now - camLast) / 1000) : 0.016;
+  camLast = now;
+  clampCam(camGoal);
+  const kp = snap ? 1 : 1 - Math.exp(-dt / 0.45), kz = snap ? 1 : 1 - Math.exp(-dt / 0.8);
+  cam.x += (camGoal.x - cam.x) * kp; cam.y += (camGoal.y - cam.y) * kp; cam.z += (camGoal.z - cam.z) * kz;
+  applyCamera();
+  return Math.abs(camGoal.x - cam.x) > 0.05 || Math.abs(camGoal.y - cam.y) > 0.05 || Math.abs(camGoal.z - cam.z) > 0.004;
+}
+// Frame a box of the pitch (metres), as tightly as the zoom limit allows.
+function frameBox(x0, y0, x1, y1) {
+  const sp = camSpan(1);
+  const z = Math.min(sp.x / Math.max(x1 - x0, 1), sp.y / Math.max(y1 - y0, 1));
+  Object.assign(camGoal, { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: clamp(z, 1, CAM_MAX) });
+}
+function frameAll() { Object.assign(camGoal, { x: PITCH.L / 2, y: PITCH.W / 2, z: 1 }); }
 
 function layout() {
   const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
@@ -944,16 +1005,8 @@ function layout() {
   // Board extent in metres along screen axes, including the margin.
   const bw = (view.portrait ? PITCH.W : PITCH.L) + 2 * MARGIN;
   const bh = (view.portrait ? PITCH.L : PITCH.W) + 2 * MARGIN;
-  const s = Math.min(cssW / bw, cssH / bh);   // uniform scale: never stretched
-  view.s = s;
-  // Centre the pitch rectangle (without margin) in the viewport.
-  const ox = (cssW - (bw - 2 * MARGIN) * s) / 2;
-  const oy = (cssH - (bh - 2 * MARGIN) * s) / 2;
-  if (view.portrait) {
-    Object.assign(view, { a: 0, b: -s, c: s, d: 0, e: ox, f: oy + PITCH.L * s });
-  } else {
-    Object.assign(view, { a: s, b: 0, c: 0, d: s, e: ox, f: oy });
-  }
+  view.s0 = Math.min(cssW / bw, cssH / bh);   // uniform scale for the whole pitch: never stretched
+  applyCamera();
   renderBackground();
 }
 
@@ -1035,34 +1088,61 @@ function makeNoise() {
   return n;
 }
 
+// Screen-space layers (floodlit surround below, grain and vignette above)
+// are cached; the pitch itself is drawn each frame through the camera, so it
+// stays sharp at any zoom.
+const fxCanvas = document.createElement('canvas');
 function renderBackground() {
   if (!colors.grass) return;
-  bgCanvas.width = canvas.width; bgCanvas.height = canvas.height;
-  const main = ctx;
-  ctx = bgCanvas.getContext('2d');
+  bgCanvas.width = fxCanvas.width = canvas.width; bgCanvas.height = fxCanvas.height = canvas.height;
   const W = canvas.width, H = canvas.height;
-  noisePattern ||= ctx.createPattern(makeNoise(), 'repeat');
-
-  // Floodlit surround: a bright pool towards the top, falling off to a vignette.
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = colors.surround;
-  ctx.fillRect(0, 0, W, H);
-  const flood = ctx.createRadialGradient(W / 2, H * 0.3, 0, W / 2, H * 0.3, Math.max(W, H) * 0.75);
+  let g = bgCanvas.getContext('2d');
+  noisePattern ||= g.createPattern(makeNoise(), 'repeat');
+  g.fillStyle = colors.surround;
+  g.fillRect(0, 0, W, H);
+  const flood = g.createRadialGradient(W / 2, H * 0.3, 0, W / 2, H * 0.3, Math.max(W, H) * 0.75);
   flood.addColorStop(0, colors.flood);
   flood.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = flood;
-  ctx.fillRect(0, 0, W, H);
+  g.fillStyle = flood;
+  g.fillRect(0, 0, W, H);
+  g = fxCanvas.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = noisePattern;
+  g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.45)');
+  g.fillStyle = vig;
+  g.fillRect(0, 0, W, H);
+  bgStamp++;
+}
+let bgStamp = 0;
 
-  // Soft shadow under the pitch.
+// The drawn pitch is cached for as long as the camera stays put.
+const pitchCanvas = document.createElement('canvas');
+let pitchKey = '';
+function drawPitch() {
+  const key = `${cam.x.toFixed(2)},${cam.y.toFixed(2)},${cam.z.toFixed(3)},${canvas.width},${canvas.height},${bgStamp}`;
+  if (key !== pitchKey) {
+    pitchCanvas.width = canvas.width; pitchCanvas.height = canvas.height;
+    const main = ctx;
+    ctx = pitchCanvas.getContext('2d');
+    drawPitchLive();
+    ctx = main;
+    pitchKey = key;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(pitchCanvas, 0, 0);
+}
+function drawPitchLive() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bgCanvas, 0, 0);
   usePitchSpace();
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.55)';
-  ctx.shadowBlur = 40 * view.dpr;
-  ctx.shadowOffsetY = 0;
+  // A soft edge under the pitch, then the grass.
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(-MARGIN - 0.6, -MARGIN - 0.2, PITCH.L + 2 * MARGIN + 1.2, PITCH.W + 2 * MARGIN + 1.4);
   ctx.fillStyle = colors.grass;
   ctx.fillRect(-MARGIN, -MARGIN, PITCH.L + 2 * MARGIN, PITCH.W + 2 * MARGIN);
-  ctx.restore();
-
   // Mown stripes: 18 bands across the length, alternating light and dark.
   const bands = 18, bw = (PITCH.L + 2 * MARGIN) / bands;
   for (let i = 0; i < bands; i++) {
@@ -1070,34 +1150,14 @@ function renderBackground() {
     ctx.fillRect(-MARGIN + i * bw, -MARGIN, bw, PITCH.W + 2 * MARGIN);
   }
   // Floodlight highlight on the grass itself.
-  const c = { x: PITCH.L / 2, y: PITCH.W / 2 };
-  const glow = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, PITCH.L * 0.65);
+  const glow = ctx.createRadialGradient(PITCH.L / 2, PITCH.W / 2, 0, PITCH.L / 2, PITCH.W / 2, PITCH.L * 0.65);
   glow.addColorStop(0, 'rgba(255,255,255,0.07)');
   glow.addColorStop(1, 'rgba(0,0,0,0.18)');
   ctx.fillStyle = glow;
   ctx.fillRect(-MARGIN, -MARGIN, PITCH.L + 2 * MARGIN, PITCH.W + 2 * MARGIN);
-
   drawMarkings();
-
-  // Noise over everything, in device pixels so the grain stays fine.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = noisePattern;
-  ctx.fillRect(0, 0, W, H);
-  // Vignette.
-  const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
-  vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx = main;
-  bgStamp++;
-}
-let bgStamp = 0;
-
-function drawPitch() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.drawImage(fxCanvas, 0, 0);
 }
 
 // Pitch markings, all at real dimensions.
@@ -1305,7 +1365,8 @@ function badge(x, y, text) {
    Sizes are in metres but floored in pixels so they stay legible and
    touchable on a phone, where 1 m can be ~5 px.
    ================================================================ */
-const playerR = () => Math.max(PLAYER_R, 7 / view.s);
+// Drawn at about a footballer's size when zoomed in, never so small he can't be read.
+const playerR = () => Math.max(7 / view.s, Math.max(0.85, Math.min(PLAYER_R, 13 / view.s)));
 const FONT_COND = "'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif";
 
 // Lighten (amt > 0) or darken (amt < 0) a #rrggbb colour.
@@ -1314,7 +1375,7 @@ function shade(hex, amt) {
   const f = (c) => Math.round(amt > 0 ? c + (255 - c) * amt : c * (1 + amt));
   return `rgb(${f(r)},${f(g)},${f(b)})`;
 }
-const ballR = () => Math.max(BALL_R, 3.5 / view.s);
+const ballR = () => Math.max(0.32, 3.6 / view.s);
 
 function drawPlayers() {
   const r = playerR();
@@ -1333,6 +1394,21 @@ function drawPlayers() {
       ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.8, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
     }
+    // Which way he is facing (from the simulation in a replay; otherwise
+    // watching the ball) and how fast he is going.
+    const face = p.face ?? (p === holder ? (p.team === 'home' ? 0 : Math.PI) : Math.atan2(state.ball.y - p.y, state.ball.x - p.x));
+    const spd = Math.hypot(p.vx || 0, p.vy || 0);
+    // Running hard: a short streak behind him, longer the faster he goes.
+    if (spd > 4.2 && !p.faded) {
+      const k = Math.min(1, (spd - 4.2) / 3.5), ux = p.vx / spd, uy = p.vy / spd;
+      const [cr, cg, cb] = p.team === 'home' ? colors.homeRGB : colors.awayRGB;
+      ctx.save(); ctx.lineCap = 'round';
+      for (const [len, wdt, al] of [[2.4, 0.9, 0.18], [1.5, 0.55, 0.28]]) {
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${al * (0.4 + 0.6 * k)})`; ctx.lineWidth = r * wdt;
+        line(p.x - ux * r * 0.5, p.y - uy * r * 0.5, p.x - ux * r * (0.5 + len * k), p.y - uy * r * (0.5 + len * k));
+      }
+      ctx.restore();
+    }
     // Drop shadow: a soft offset ellipse, far cheaper than shadowBlur per disc.
     ctx.fillStyle = 'rgba(0,0,0,0.32)';
     const sh = screenOffset(r * 0.15, r * 0.3);
@@ -1345,13 +1421,29 @@ function drawPlayers() {
     }
     // Shaded disc: lit from the top-left of the screen, whatever the rotation.
     const lo = screenOffset(-r * 0.4, -r * 0.4), lit = { x: p.x + lo.x, y: p.y + lo.y };
+    // Keepers wear a different kit, ringed in their team's colour.
+    const keeper = p.role === 'GK', kit = keeper ? (p.team === 'home' ? '#22b07d' : '#9a6be0') : colors[p.team];
     const g = ctx.createRadialGradient(lit.x, lit.y, r * 0.1, p.x, p.y, r);
-    g.addColorStop(0, shade(colors[p.team], 0.35));
-    g.addColorStop(1, shade(colors[p.team], -0.15));
+    g.addColorStop(0, shade(kit, 0.35));
+    g.addColorStop(1, shade(kit, -0.15));
     ctx.fillStyle = g;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = r * 0.14;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = keeper ? colors[p.team] : '#fff';
+    ctx.lineWidth = r * (keeper ? 0.2 : 0.14);
+    if (p.mode === 'dive' && spd > 1) {
+      // A diving keeper: stretched out along his dive.
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
+      ctx.beginPath(); ctx.ellipse(0, 0, r * 1.9, r * 0.75, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+    } else { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    // Facing: a bright arc on the rim where he is looking, and a point on it.
+    if (appMode !== 'board' || lab.play) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = r * 0.3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.18, face - 0.55, face + 0.55); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      const fx = Math.cos(face), fy = Math.sin(face), tip = r * 1.62, base = r * 1.2, wdt = r * 0.32;
+      ctx.beginPath(); ctx.moveTo(p.x + fx * tip, p.y + fy * tip); ctx.lineTo(p.x + fx * base - fy * wdt, p.y + fy * base + fx * wdt); ctx.lineTo(p.x + fx * base + fy * wdt, p.y + fy * base - fx * wdt); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
 
     if (p === holder) {
       ctx.save();
@@ -1398,16 +1490,20 @@ function drawPlayers() {
       dot(q.x, q.y, ballR() * (0.35 + (0.5 * (i + 1)) / state.trail.length));
     });
   }
-  // Ball on top of everything.
-  const br = ballR() * (1 + 0.7 * (state.ballLift || 0));
-  if (state.ballLift) {
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    dot(state.ball.x, state.ball.y + br * 1.2 * state.ballLift, ballR());
-  }
+  // Ball on top of everything. In the air it rises off its shadow (drawn on
+  // the grass where it is) and looks a little bigger, nearer the camera.
+  const h = lab.play ? state.ballH || 0 : (state.ballLift || 0) * 6;
+  const br = ballR() * (1 + Math.min(0.6, h * 0.06));
+  const up = screenOffset(0, -1), lift = h * 0.5;
+  ctx.fillStyle = `rgba(0,0,0,${h > 0.3 ? 0.3 : 0.4})`;
+  ctx.beginPath(); ctx.ellipse(state.ball.x - up.x * ballR() * 0.25, state.ball.y - up.y * ballR() * 0.25, ballR() * 1.05, ballR() * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+  const bx = state.ball.x + up.x * lift, by = state.ball.y + up.y * lift;
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#111';
   ctx.lineWidth = br * 0.25;
-  ctx.beginPath(); ctx.arc(state.ball.x, state.ball.y, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.arc(bx + br * 0.25, by - br * 0.15, br * 0.32, 0, Math.PI * 2); ctx.fill();
 }
 
 /* ================================================================
@@ -1527,13 +1623,16 @@ canvas.addEventListener('pointerdown', (ev) => {
     return;
   }
   if (appMode === 'match') return;
+  // Choosing the target of an order: this tap is the target.
+  if (coachingBoard() && lab.orderPick && orderPickAt(pt)) { requestRender(); return; }
   if (!hit) {
     state.selected = null;
+    if (coachingBoard() && lab.orderSel != null) closeOrderMenu();
     requestRender();
     return;
   }
   const t = hit.target;
-  drag = { kind: hit.kind, target: t, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null, start: pt };
+  drag = { kind: hit.kind, target: t, pointerId: ev.pointerId, dx: t.x - pt.x, dy: t.y - pt.y, carried: null, start: pt, orig: { x: t.x, y: t.y } };
   if (state.tool === 'pass' && hit.kind === 'ball') {
     const passer = carrier();
     if (!passer) { drag = null; toast('Nobody has the ball: move a player onto it first'); return; }
@@ -1612,8 +1711,13 @@ function endDrag(ev) {
   }
   const done = drag;
   drag = null;
-  // Coaching screens remember who you placed by hand.
-  if ((appMode === 'lab' || appMode === 'lessons') && (done.kind === 'player' || done.kind === 'ball')) lab.moved.add(done.kind === 'ball' ? 'ball' : done.target.id);
+  // Coaching screens: a tap on one of your players opens his orders; a drag
+  // moves him (and is remembered as placed by hand).
+  const tapped = done.kind === 'player' && dist(done.target, done.orig) < 0.6;
+  if (coachingBoard() && tapped) {
+    Object.assign(done.target, done.orig);
+    if (done.target.team === 'home') openOrderMenu(slotOf(done.target)); else closeOrderMenu();
+  } else if ((appMode === 'lab' || appMode === 'lessons') && (done.kind === 'player' || done.kind === 'ball')) { lab.moved.add(done.kind === 'ball' ? 'ball' : done.target.id); if (lab.orderSel != null) renderOrderMenu(); }
   if (done.kind === 'pass' && done.to) commitPass(done.passer, done.to);
   canvas.style.cursor = ev.pointerType === 'mouse' && hitTest(pointerPitch(ev)) ? 'grab' : 'default';
   requestRender();
@@ -2224,6 +2328,9 @@ const ENG = {
   ROLL_F: 2.2,           // a passed ball slows about 2.2 m/s² on grass
   LOOSE_F: 3.4,          // a deflected, spinning ball slows faster
   HEAD_H: 2.7,           // a dropping ball can be headed below this height
+  BRAKE: 6.2,            // m/s²: the hardest a player can stop
+  LAT: 5.2,              // m/s²: sideways grip when turning at speed (a sprinter runs an arc)
+  DRIB_F: 6,             // a ball knocked on while dribbling slows this fast relative to the runner
   TR_LOSS: 5, TR_WIN: 6, // seconds a transition instruction governs after the ball changes hands
 };
 
@@ -2269,9 +2376,9 @@ const GK_ATTRS = [
 ];
 const at = (p, k) => p.a[k] ?? 10;
 const passSkill = (p) => at(p, p.pos === 'GK' ? 'distribution' : 'passing');
-const vmaxOf = (p) => (p.pos === 'GK' ? 5.9 : 6.6) + 0.095 * at(p, 'pace');      // m/s: pace 10 → 7.55, 18 → 8.3
-const accOf = (p) => 4.6 + 0.12 * at(p, 'pace');                                  // m/s²
-const jogOf = (p) => 3.4 + 0.08 * at(p, 'work');                                  // m/s when holding shape
+const vmaxOf = (p) => (p.pos === 'GK' ? 6.2 : 6.9) + 0.1 * at(p, 'pace');         // m/s: pace 10 → 7.9 (28 km/h), 18 → 8.7 (31 km/h)
+const accOf = (p) => 6.6 + 0.1 * at(p, 'pace') + 0.04 * at(p, 'work');           // m/s² from a standstill: 10 → 8.0
+const jogOf = (p) => 2.9 + 0.06 * at(p, 'work');                                  // m/s when drifting into shape: 10 → 3.5
 const reactOf = (p) => 0.37 - 0.011 * at(p, 'positioning');                       // s: 10 → 0.26
 const carryOf = (p) => 4.3 + 0.06 * at(p, 'dribbling') + 0.045 * at(p, 'pace');  // m/s with the ball
 
@@ -2404,7 +2511,7 @@ const FRONT_U = { low: 44, mid: 60, high: 84 };             // how far up the bl
 const PRESS_ZONE = { low: 36, mid: 60, high: 110 };         // press once the ball is this close to our goal
 const BLOCK_W = { narrow: 0.6, normal: 0.72, wide: 0.86 };  // lateral spread of the block (× formation width)
 const PRESSERS = { less: 1, normal: 1, more: 2 };
-const PRESS_GAP = { less: 2.8, normal: 1.8, more: 1.1 };    // how close the presser gets (m)
+const PRESS_GAP = { less: 2.2, normal: 1.25, more: 0.95 };  // how close the presser gets (m)
 const TACKLE_RATE = { feet: 0.22, normal: 0.36, hard: 0.6 }; // tackle attempts per second when touch-tight
 const FOUL_P = { feet: 0.15, normal: 0.28, hard: 0.45 };      // share of failed tackles that are fouls
 const RUNS_K = { few: 0.35, some: 1, many: 1.8 };
@@ -2595,8 +2702,9 @@ function engCreate(input) {
       const p = { id: `${team}-${i}`, team, i, num: slot[4], name: pl.name || '', pos: group, label: slot[2], unit: slot[3], roleKey, R: ROLES[roleKey], a: pl.a || {},
         slotU: slot[0], slotY: sy, side: sy < 30 ? -1 : sy > 38 ? 1 : 0, x, y, vx: 0, vy: 0, target: { x, y }, spd: 0, mode: 'shape',
         until: 0, stun: 0, nextDecide: 0, gotAt: -9, runStart: -9, runKind: '', zone: -1, marking: null, vs: null, heavy: false, freeT: 0, freeLogged: false,
-        vmax: 0, acc: 0, jog: 0, react: 0, pi: 'normal', pk: 1 };
+        vmax: 0, acc: 0, jog: 0, react: 0, pi: 'normal', pk: 1, goAt: 0, order: null, face: team === 'home' ? 0 : Math.PI, vh: new Float32Array(16), lag: 3 };
       p.vmax = vmaxOf(p); p.acc = accOf(p); p.jog = jogOf(p); p.react = reactOf(p);
+      p.lag = clamp(Math.round(p.react / ENG.DT), 1, 7);           // ticks behind what he sees
       p.pi = PLAYER_PRESS[spec.tactic.pi?.[i]] ? spec.tactic.pi[i] : 'normal';
       p.pk = (p.R.press ?? 1) * PLAYER_PRESS[p.pi].k;             // how eagerly he presses
       w.players.push(p); w.by[team].push(p);
@@ -2608,6 +2716,9 @@ function engCreate(input) {
     t0: 0, T: 0, H: 0, from: null, to: null, aim: null, tried: null, odds: 0, offIds: null, lineAt: null, passerU: null, pressers: null, contested: false,
     zone: '', result: '', blocker: null, shooter: null };
   holder.gotAt = 0; holder.mode = 'carry'; holder.nextDecide = 0.45;
+  // Everyone starts watching the ball; the man on it faces the way he is playing.
+  for (const p of w.players) p.face = p === holder ? (p.team === 'home' ? 0 : Math.PI) : Math.atan2(w.ball.y - p.y, w.ball.x - p.x);
+  w.byId = Object.fromEntries(w.players.map((p) => [p.id, p]));
   // A test is a hundred versions of the situation, not one frozen picture
   // replayed: each run nudges everyone a little from where they were drawn
   // and varies how long the man on the ball takes to look up. Seeded, so
@@ -2620,6 +2731,17 @@ function engCreate(input) {
       p.target = { x: p.x, y: p.y };
     }
     holder.nextDecide = 0.3 + r() * 0.5;
+  }
+  // The coach's orders for individual players in this passage.
+  w.orders = [];
+  for (const o of input.orders || []) {
+    const p = w.by[o.team]?.[o.slot];
+    if (!p) continue;
+    const ord = { ...o, p, vsP: o.vs != null ? w.by[oppOf(o.team)][o.vs] : null, mateP: o.mate != null ? w.by[o.team][o.mate] : null,
+      done: false, ok: false, note: '', presses: 0, tried: false };
+    if ((ord.kind === 'press' || ord.kind === 'mark') && !ord.vsP) continue;
+    if (ord.kind === 'pass' && (!ord.mateP || ord.mateP === p)) continue;
+    p.order = ord; w.orders.push(ord);
   }
   if (input.transition) { w.T[input.poss].wonAt = 0; w.T[oppOf(input.poss)].lostAt = 0; }
   w.T[input.poss].possStart = 0;
@@ -2677,9 +2799,30 @@ function laneClear(a, b, foes) {
 }
 
 /* ---------------- Off the ball: the team with it ---------------- */
+// Small shifts in a player's spot don't move him: a man in position stays
+// put until his spot has moved a real distance, so the shape drifts with the
+// ball instead of twitching at every pass.
+// It also works out how fast each spot is moving, so a team moving up with
+// the ball runs with it rather than trailing behind its own shape.
+function settle(list, before) {
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i], [mode, x, y] = before[i];
+    const same = p.mode === 'shape' && mode === 'shape';
+    let vx = same ? (p.target.x - x) / ENG.THINK : 0, vy = same ? (p.target.y - y) / ENG.THINK : 0;
+    if (same && hyp(p.target.x - x, p.target.y - y) < 1.3 && hyp(p.x - x, p.y - y) < 1.5 && hyp(vx, vy) < 2.5) { p.target = { x, y }; vx = vy = 0; }
+    p.tvx = 0.5 * (p.tvx || 0) + 0.5 * vx; p.tvy = 0.5 * (p.tvy || 0) + 0.5 * vy;
+  }
+}
 function thinkAttack(w, team) {
+  const before = w.by[team].map((p) => [p.mode, p.target.x, p.target.y]);
+  thinkAttack0(w, team);
+  settle(w.by[team], before);
+}
+function thinkAttack0(w, team) {
   const Tm = w.T[team], ins = Tm.ins, b = w.ball, opp = oppOf(team);
-  const ub = depthOf(team, b.x), by = b.y;
+  // The shape follows where the ball has been over the last second; runs and
+  // support react to where it is now.
+  const ub = depthOf(team, w.bsx ?? b.x), by = w.bsy ?? b.y;
   const carrier = b.state === 'held' && b.owner.team === team ? b.owner : null;
   const offU = offsideDepth(w, team);
   let midSum = 0, midN = 0;
@@ -2696,6 +2839,13 @@ function thinkAttack(w, team) {
     hasHB: w.by[team].some((p) => p.roleKey === 'hb') };
   for (const p of w.by[team]) {
     if (p === carrier || p.stun > w.t) continue;
+    // The coach's run: off he goes, from the moment the passage starts (after
+    // any delay he was given), until he gets there or his side loses it.
+    const od = p.order;
+    if (od && od.kind === 'run' && !od.done && w.t >= (od.delay || 0) && !(p.mode === 'receive' && b.state !== 'held')) {
+      if (hyp(p.x - od.to.x, p.y - od.to.y) < 2.2) { od.done = true; od.ok = true; od.at = w.t; log(w, `${tag(p)} makes the run you asked for`, 'plan', team); }
+      else { p.target = { x: od.to.x, y: od.to.y }; p.spd = p.vmax * 0.95; if (p.mode !== 'run') { p.runStart = w.t; } p.mode = 'run'; p.runKind = 'plan'; p.until = w.t + 0.6; continue; }
+    }
     // A run in progress carries on, unless the ball hasn't come and he has
     // strayed offside: then he checks back.
     if (p.until > w.t && (p.mode === 'run' || p.mode === 'box') && !(carrier && depthOf(team, p.x) > offU + 1)) continue;
@@ -2705,7 +2855,7 @@ function thinkAttack(w, team) {
     const far = hyp(p.target.x - p.x, p.target.y - p.y);
     // Off the ball a player jogs into position, but sprints to rejoin when
     // far away, and the whole team breaks forward on a counter.
-    p.spd = far > 12 || counter ? p.vmax * (0.72 + 0.014 * at(p, 'work')) : p.jog;
+    p.spd = counter && far > 4 ? p.vmax * (0.72 + 0.014 * at(p, 'work')) : far > 16 ? p.vmax * 0.8 : far > 7 ? p.jog + 1.3 : p.jog;
     p.mode = 'shape';
   }
   spreadOut(w.by[team], carrier);
@@ -2773,7 +2923,7 @@ function spreadOut(list, carrier) {
 function support(w, team, c, ctx, ins) {
   const foes = w.by[oppOf(team)];
   const n = ins.passing === 'short' || ins.tempo === 'slow' ? 3 : 2;
-  const mates = w.by[team].filter((p) => p !== c && p.pos !== 'GK' && p.stun <= w.t && !(p.until > w.t && (p.mode === 'run' || p.mode === 'box')))
+  const mates = w.by[team].filter((p) => p !== c && p.pos !== 'GK' && p.stun <= w.t && !(p.until > w.t && (p.mode === 'run' || p.mode === 'box')) && p.order?.kind !== 'hold')
     .sort((a, b) => hyp(a.x - c.x, a.y - c.y) - hyp(b.x - c.x, b.y - c.y)).slice(0, n);
   for (const p of mates) {
     const rest = p.R.rest || p.pos === 'CB';
@@ -2788,7 +2938,7 @@ function support(w, team, c, ctx, ins) {
       const sc = Math.min(laneClear(c, cand, foes), 5) * 1.2 + Math.min(nearestDist(cand, foes), 8) * 0.6 + (cu - ctx.ub) * 0.2 - hyp(p.x - cand.x, p.y - cand.y) * 0.12;
       if (sc > bs) { bs = sc; best = cand; }
     }
-    if (best) { p.target = best; p.spd = p.vmax * 0.8; p.mode = 'support'; }
+    if (best) { p.target = best; p.spd = p.vmax * 0.7; p.mode = 'support'; }
   }
 }
 
@@ -2811,6 +2961,7 @@ function runs(w, team, c, ctx, ins, counter) {
   for (const p of w.by[team]) {
     if (p === c || p.pos === 'GK' || p.pos === 'CB' || p.R.rest || p.stun > w.t) continue;
     if (p.until > w.t && (p.mode === 'run' || p.mode === 'box')) continue;
+    if (p.order?.kind === 'hold' || (p.order?.kind === 'run' && !p.order.done)) continue;
     const R = p.R.runs;
     if (!R) continue;
     const u = depthOf(team, p.x);
@@ -2834,7 +2985,7 @@ function runs(w, team, c, ctx, ins, counter) {
 function boxZones(w, team, c, ctx) {
   const s = Math.sign(c.y - MID) || 1;
   const zones = [[99.5, MID + s * 4], [98.5, MID - s * 6], [93.5, MID - s], [88, MID + s * 3]];
-  const cands = w.by[team].filter((p) => p !== c && p.pos !== 'GK' && p.pos !== 'CB' && !p.R.rest && p.stun <= w.t
+  const cands = w.by[team].filter((p) => p !== c && p.pos !== 'GK' && p.pos !== 'CB' && !p.R.rest && p.stun <= w.t && p.order?.kind !== 'hold'
     && (p.R.runs?.box || p.pos === 'ST') && !(p.mode === 'run' && p.until > w.t) && depthOf(team, p.x) > 55)
     .sort((a, b) => (b.R.runs?.box || 0.5) + (b.pos === 'ST' ? 1 : 0) - (a.R.runs?.box || 0.5) - (a.pos === 'ST' ? 1 : 0));
   cands.slice(0, 4).forEach((p, i) => {
@@ -2847,32 +2998,37 @@ function boxZones(w, team, c, ctx) {
 
 /* ---------------- Off the ball: the team without it ---------------- */
 function thinkDefend(w, team) {
+  const before = w.by[team].map((p) => [p.mode, p.target.x, p.target.y]);
+  thinkDefend0(w, team);
+  settle(w.by[team], before);
+}
+function thinkDefend0(w, team) {
   const Tm = w.T[team], ins = Tm.ins, b = w.ball, opp = oppOf(team);
-  const bd = depthOf(team, b.x);
+  const bd = depthOf(team, b.x), bdS = Math.max(depthOf(team, w.bsx ?? b.x), bd - 12);
   const since = w.t - Tm.lostAt;
   const cpress = !w.setup && ((ins.onLoss === 'counterpress' && since < ENG.TR_LOSS) || (ins.onLoss === 'mixed' && since < 2.2));
   const regroup = ins.onLoss === 'regroup' && since < ENG.TR_LOSS;
   const carrier = b.state === 'held' && b.owner.team === opp ? b.owner : null;
   const L0 = LINE_U[ins.line];
-  let lineU = clamp(Math.min(L0, bd - 9), 11.5, L0);
+  let lineU = clamp(Math.min(L0, bdS - 9, bd - 4), 11.5, L0);
   // Offside trap: the line steps up together when the ball goes backwards.
   const away = b.state === 'held' ? depthVel(team, b.owner) : depthVel(team, b);
   if (ins.trap === 'on' && away > 1.5 && bd > lineU + 10) lineU = Math.min(lineU + 3.5, bd - 6);
   // No pressure on the ball and a man facing forward: the line drops off a few metres.
   else if (carrier && bd > lineU + 12 && nearestDist(carrier, w.by[team]) > 4 && depthVel(opp, carrier) > -0.5) lineU = Math.max(11.5, lineU - 4);
   Tm.lineU = lineU;
-  const frontU = cpress ? clamp(bd, lineU + 18, 95) : clamp(bd - 3, lineU + 18, Math.max(FRONT_U[ins.engage], lineU + 18));
+  const frontU = cpress ? clamp(bd, lineU + 18, 95) : clamp(bdS - 3, lineU + 18, Math.max(FRONT_U[ins.engage], lineU + 18));
   const Wk = BLOCK_W[ins.compact];
   // A press trap: hold off until the ball goes where we want it, then spring.
   const trapping = ins.pressTo !== 'none';
   const inTrap = carrier ? inTrapZone(ins.pressTo, opp, carrier) : false;
-  const cy = MID + (b.y - MID) * (trapping && inTrap ? 0.72 : 0.52);
+  const cy = MID + ((trapping && inTrap ? b.y : w.bsy ?? b.y) - MID) * (trapping && inTrap ? 0.72 : 0.52);
   const mine = w.by[team];
   const inFlight = b.state === 'air' || (b.state === 'roll' && b.kind !== 'loose');
   for (const d of mine) {
     if (d.stun > w.t) continue;
     if (inFlight && (d.mode === 'intercept' || d.mode === 'sweep')) continue;    // still going for the ball
-    if (d.pos === 'GK') { d.target = keeperSpot(w, team, d); d.spd = d.jog; d.mode = 'keeper'; continue; }
+    if (d.pos === 'GK') { if (d.mode === 'dive' && d.until > w.t) continue; d.target = keeperSpot(w, team, d); d.spd = d.jog + 1; d.mode = 'keeper'; continue; }
     let f = { D: 0, DM: 0.22, M: 0.45, AM: 0.72, A: 1 }[d.unit];
     if (d.pos === 'FB' || d.pos === 'WB') f = d.unit === 'M' && bd > 45 && !d.R.rest ? 0.12 : 0;
     if (d.pos === 'W' || d.pos === 'WM') { const tr = d.R.track ?? 1; f = tr >= 1.2 ? 0.3 : tr >= 1 ? 0.42 : tr >= 0.6 ? 0.66 : 0.9; }
@@ -2881,12 +3037,28 @@ function thinkDefend(w, team) {
     const y = clamp(cy + (d.slotY - MID) * Wk, 2, PITCH.W - 2);
     d.target = { x: xAtDepth(team, u), y };
     const far = hyp(d.target.x - d.x, d.target.y - d.y);
-    d.spd = regroup || far > 10 ? d.vmax * (0.74 + 0.012 * at(d, 'work')) : d.jog;
+    // Back into shape: a sprint when he is well out of it (or told to regroup), a run when a bit off, a jog otherwise.
+    const behindBall = depthOf(team, d.x) > bd;
+    d.spd = regroup || far > 16 || (far > 8 && behindBall) ? d.vmax * (0.74 + 0.012 * at(d, 'work')) : far > 6 ? d.jog + 1.3 : d.jog;
     d.mode = 'shape';
   }
   if (w.setup) return;
   const attackers = w.by[opp].filter((a) => a.pos !== 'GK');
   const taken = new Set(), busy = new Set(inFlight ? mine.filter((d) => d.mode === 'intercept' || d.mode === 'sweep') : []);
+  // The coach's orders come first: press a named man when he has it, stay
+  // with a named man wherever he goes.
+  for (const d of mine) {
+    const od = d.order;
+    if (!od || busy.has(d) || d.stun > w.t || d.pos === 'GK') continue;
+    if ((od.kind === 'press' || od.kind === 'mark') && carrier === od.vsP) {
+      if (d.mode !== 'press') { od.presses++; log(w, `${tag(d)} goes to press ${tag(carrier)}, as planned`, 'plan', team); }
+      d.mode = 'press'; d.spd = d.vmax * 0.95; busy.add(d); taken.add(carrier);
+    } else if (od.kind === 'mark') {
+      const a = od.vsP, g = { x: xAtDepth(team, 0), y: MID }, k = 1.3 / Math.max(hyp(a.x - g.x, a.y - g.y), 1);
+      d.target = { x: a.x + (g.x - a.x) * k, y: a.y + (g.y - a.y) * k };
+      d.mode = 'mark'; d.marking = a.id; d.spd = d.vmax * 0.92; busy.add(d); taken.add(a);
+    }
+  }
   // Runners going beyond the line: the nearest defender tracks him, once
   // he has seen the run (reaction time, plus a moment watching the ball).
   for (const a of attackers) {
@@ -2914,7 +3086,7 @@ function thinkDefend(w, team) {
     // angle that shuts the escape route; the swarm comes once it is in the trap.
     const on = bd <= PRESS_ZONE[ins.engage] || cpress;
     // Men told to stay in shape don't press unless it's in front of our own box.
-    const cands = mine.filter((d) => d.pos !== 'GK' && !busy.has(d) && d.stun <= w.t && (d.pi !== 'hold' || bd < 25))
+    const cands = mine.filter((d) => d.pos !== 'GK' && !busy.has(d) && d.stun <= w.t && (d.pi !== 'hold' || bd < 25) && d.order?.kind !== 'hold')
       .map((d) => ({ d, t: pressTime(d, carrier) / Math.sqrt(d.pk) }))
       .sort((a, b) => a.t - b.t);
     // A stopper steps out to a forward who drops in front of the line.
@@ -2932,7 +3104,8 @@ function thinkDefend(w, team) {
       let used = 0;
       for (const { d, t } of cands) {
         if (used >= n || busy.has(d)) continue;
-        if (used > 0 && (t > 2.6 || (d.R.rest && !cpress && used >= 1))) continue;
+        // A second or third man joins if he can be there in time (about 18 m away at most).
+        if (used > 0 && (t > 3.4 || (d.R.rest && !cpress && used >= 1))) continue;
         // The counter-press is the job of the men near the ball; the back line and the holding men keep their places.
         if (cpress && used > 0 && bd > 30 && (d.unit === 'D' || d.R.rest)) continue;
         d.mode = 'press'; d.spd = d.vmax * (0.86 + 0.01 * at(d, 'work')); busy.add(d); used++;
@@ -2969,7 +3142,7 @@ function thinkDefend(w, team) {
     for (const a of ranked) {
       let best = null, bdist = bd > 55 && !cpress ? 22 : 14;
       for (const d of mine) {
-        if (d.pos === 'GK' || busy.has(d) || d.stun > w.t || d.R.dropOff || d.pi === 'hold') continue;
+        if (d.pos === 'GK' || busy.has(d) || d.stun > w.t || d.R.dropOff || d.pi === 'hold' || d.order?.kind === 'hold') continue;
         // Defenders only step onto forwards near our line; midfield and attack go to theirs.
         if ((d.unit === 'D' || (cpress && d.R.rest)) && depthOf(team, a.x) > lineU + (cpress ? 8 : 16)) continue;
         const dd = hyp(d.x - a.x, d.y - a.y) / (d.pi === 'hunt' ? 1.4 : 1);
@@ -3014,7 +3187,26 @@ function thinkDefend(w, team) {
 
 // A side counter-pressing right now: its instruction and the seconds since it lost the ball.
 const counterPressing = (w, team) => { const T = w.T[team], s = w.t - T.lostAt; return (T.ins.onLoss === 'counterpress' && s < ENG.TR_LOSS) || (T.ins.onLoss === 'mixed' && s < 2.2); };
-const pressTime = (d, c) => d.react + Math.max(0, hyp(d.x - c.x, d.y - c.y) - 1) / d.vmax;
+const pressTime = (d, c) => d.react + runT(d, c.x, c.y, 1);
+// How long a player takes to cover the ground to a point (less `slack`),
+// with the same body as move(): turning to face it first, then speeding up
+// from whatever pace he already has that way towards his top speed. Every
+// estimate in the engine (who gets to a pass, who presses, who sweeps) uses
+// this, so decisions match what the legs can actually do.
+function runT(p, x, y, slack = 0) {
+  const dx = x - p.x, dy = y - p.y, D = hyp(dx, dy), s = D - slack;
+  if (s <= 0) return 0;
+  const V = p.vmax, tau = (V + 0.3) / p.acc;
+  const v0 = clamp((p.vx * dx + p.vy * dy) / D, 0, V * 0.98);
+  const turn = s > 2 ? Math.acos(clamp((dx * Math.cos(p.face) + dy * Math.sin(p.face)) / D, -1, 1)) / (11 - 0.75 * hyp(p.vx, p.vy)) * 0.6 : 0;
+  // x(t) = V t − (V − v0) τ (1 − e^(−t/τ)); solve for t by Newton's method.
+  let t = s / V + (1 - v0 / V) * tau * 0.6;
+  for (let i = 0; i < 2; i++) {
+    const e = Math.exp(-t / tau), f = V * t - (V - v0) * tau * (1 - e) - s, df = V - (V - v0) * e;
+    t = Math.max(0.01, t - f / df);
+  }
+  return t + turn;
+}
 // Pressing triggers: a pass backwards, a heavy touch, a receiver facing his
 // own goal, or the ball near the touchline.
 function pressTrigger(w, team, c) {
@@ -3081,8 +3273,8 @@ function groundOdds(w, c, to, q, v0, team) {
       const s = d * fr, px = c.x + ux * s, py = c.y + uy * s;
       const tb = rollTime(v0, s) + 0.08;
       const back = depthOf(f.team, px) < depthOf(f.team, f.x) - 3 ? 0.3 : 0;
-      const td = Math.max(f.react * 0.7, f.react + back + Math.max(0, hyp(f.x - px, f.y - py) - ENG.REACH) / f.vmax);
-      const reach = sigmoid((tb - td - 0.1) / 0.17);
+      const td = Math.max(f.react * 0.7, f.react + back + runT(f, px, py, ENG.REACH));
+      const reach = sigmoid((tb - td - (ENG.REACH_K ?? -0.1)) / 0.17);
       if (reach < 0.01) continue;
       const clean = clamp(0.78 - 0.025 * (rollSpeedAt(v0, s) - 8) + 0.012 * (at(f, 'positioning') - 10), 0.3, 0.92);
       worst = Math.max(worst, reach * (clean + (1 - clean) * 0.5));
@@ -3090,7 +3282,7 @@ function groundOdds(w, c, to, q, v0, team) {
     keep *= 1 - worst;
   }
   // The receiver has to get there and take it.
-  const tRec = q.react * 0.5 + Math.max(0, hyp(q.x - to.x, q.y - to.y) - ENG.REACH) / q.vmax;
+  const tRec = q.react * 0.5 + runT(q, to.x, to.y, ENG.REACH);
   if (tRec > tArr + 0.25) keep *= clamp(1 - (tRec - tArr - 0.25), 0, 1);
   // A ball that would roll on out of play needs him there in good time.
   const vEnd = rollSpeedAt(v0, d), run = (vEnd * vEnd) / (2 * ENG.ROLL_F);
@@ -3111,14 +3303,14 @@ function airOdds(w, c, to, q, team, cross) {
   const skill = cross ? at(c, 'crossing') : passSkill(c);
   const sd = d * (0.085 - 0.0032 * skill);
   const acc = clamp(1 - sd / 6.5, 0.3, 0.97);
-  const tRec = q.react * 0.5 + Math.max(0, hyp(q.x - to.x, q.y - to.y) - 1.4) / q.vmax;
+  const tRec = q.react * 0.5 + runT(q, to.x, to.y, 1.4);
   const recOk = tRec <= T + 0.2 ? 1 : clamp(1 - (tRec - T - 0.2) / 0.8, 0, 1);
   let best = -Infinity;
   const opp = oppOf(team);
   for (const f of w.by[opp]) {
     const hands = f.pos === 'GK' && inBox(team, to) && depthOf(team, to.x) > PITCH.L - 9 - at(f, 'command') * 0.15;
-    const tf = f.react + Math.max(0, hyp(f.x - to.x, f.y - to.y) - 1.6) / f.vmax;
-    if (tf < T + 0.1) best = Math.max(best, aerialScore(f, hands));
+    const tf = f.react + runT(f, to.x, to.y, 1.6);
+    if (tf < T + (ENG.AIR_K ?? 0.5)) best = Math.max(best, aerialScore(f, hands));
   }
   const win = best === -Infinity ? ctrlProb(q, 9, true, 5) : sigmoid((aerialScore(q, false) - best) / 3);
   return { p: acc * recOk * win, T };
@@ -3215,7 +3407,7 @@ function options(w, c) {
     const seenU = depthOf(team, q.x) + gauss(w.rng) * (1.3 - vis / 25);
     const off = seenU > offU2 && depthOf(team, q.x) > PITCH.L / 2 ? 0.25 : 0;
     const u = odds * value - (1 - odds) * lossAt(to) + pref(d, air, to, gain) - off;
-    opts.push({ kind: 'pass', type: kind, to, rec: q, odds, v0, T, u, gain, d, air });
+    opts.push({ kind: 'pass', type: kind, to, rec: q, odds, v0, T, u, gain, d, air, off: off > 0 });
   };
   for (const q of w.by[team]) {
     if (q === c || q.stun > w.t) continue;
@@ -3307,7 +3499,7 @@ function addCrosses(w, c, opts, lossAt, R, ins) {
     let q = null, qt = Infinity;
     for (const m of w.by[team]) {
       if (m === c || m.pos === 'GK') continue;
-      const t = Math.max(0, hyp(m.x - to.x, m.y - to.y) - 1.5) / m.vmax;
+      const t = runT(m, to.x, to.y, 1.5);
       if (t < qt) { qt = t; q = m; }
     }
     const d = hyp(to.x - c.x, to.y - c.y);
@@ -3354,7 +3546,22 @@ function choose(w, c, opts) {
 function decide(w, c) {
   const opts = options(w, c);
   if (!opts.length) { c.nextDecide = w.t + 0.3; return; }
-  const o = choose(w, c, opts);
+  let o = choose(w, c, opts);
+  // The coach said where this one goes when he gets it. He plays it if the
+  // pass is on at all; if it isn't, he looks for it for a second or so.
+  const od = c.order;
+  if (od && !od.done && od.kind === 'pass') {
+    // Not to a man he can see is offside: he waits for him to come back on.
+    const mine = opts.filter((q) => q.kind === 'pass' && q.rec === od.mateP && q.odds >= 0.3 && !q.off).sort((a, b) => b.u - a.u)[0];
+    od.tried = true;
+    if (mine) { o = mine; od.done = true; od.ok = true; od.at = w.t; log(w, `${tag(c)} plays it to ${tag(od.mateP)}, as planned`, 'plan', c.team); }
+    else if (w.t - c.gotAt > 1.6) { od.done = true; od.note = 'not on'; log(w, `${tag(c)} can't find ${tag(od.mateP)}: ${opts.some((q) => q.rec === od.mateP && q.off) ? 'he is offside' : 'the pass isn’t on'}`, 'plan', c.team); }
+    else if (o.kind === 'pass' || o.kind === 'clear') { const keep = opts.find((q) => q.kind === 'carry' || q.kind === 'hold' || q.kind === 'shield'); if (keep) o = keep; }
+  } else if (od && !od.done && od.kind === 'carry') {
+    if (hyp(c.x - od.to.x, c.y - od.to.y) < 3) { od.done = true; od.ok = true; od.at = w.t; log(w, `${tag(c)} has carried it where you wanted`, 'plan', c.team); }
+    else if (w.t - c.gotAt < 4 && o.kind !== 'shoot') { c.target = { x: od.to.x, y: od.to.y }; c.spd = carryOf(c); c.mode = 'dribble'; c.nextDecide = w.t + 0.3; od.tried = true; return; }
+    else od.done = true;
+  }
   const think = TEMPO[w.T[c.team].ins.tempo].think;
   if (o.kind === 'pass') return o.air ? kickAir(w, c, o) : kickGround(w, c, o);
   if (o.kind === 'shoot') return shoot(w, c, false);
@@ -3377,13 +3584,14 @@ function kickGround(w, c, o) {
   const sd = (0.045 - 0.0018 * passSkill(c)) * (pressed ? 1.5 - 0.02 * at(c, 'composure') : 1);
   const ang = Math.atan2(o.to.y - c.y, o.to.x - c.x) + gauss(w.rng) * Math.max(sd, 0.004);
   const v0 = o.v0 * (1 + gauss(w.rng) * 0.05);
+  c.face = ang;
   Object.assign(b, { state: 'roll', owner: null, x: c.x + Math.cos(ang) * 0.6, y: c.y + Math.sin(ang) * 0.6, h: 0, vx: Math.cos(ang) * v0, vy: Math.sin(ang) * v0, kind: o.type, intended: o.rec,
     passer: c, t0: w.t, team, tried: new Set(), odds: o.odds, from: { x: c.x, y: c.y }, aim: o.to, ...releaseInfo(w, c) });
-  o.rec.mode = 'receive'; o.rec.target = o.to; o.rec.spd = o.rec.vmax;
+  o.rec.mode = 'receive'; o.rec.target = o.to; o.rec.spd = o.rec.vmax; o.rec.goAt = w.t + o.rec.react * 0.5;
   c.mode = 'shape';
   const S = w.T[team].S;
   S.passes++; S.passLen += o.d; if (o.d > 30) S.long++;
-  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: false, team });
+  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: false, team, type: o.type });
   const verb = o.type === 'through' ? 'slides a through ball to' : o.type === 'cutback' ? 'cuts it back for' : o.gain < -3 ? 'plays it back to' : 'passes to';
   log(w, `${tag(c)} ${verb} ${tag(o.rec)}`, 'pass', team);
   assignInterceptors(w, team);
@@ -3396,6 +3604,7 @@ function kickAir(w, c, o) {
   const sd = o.d * (0.085 - 0.0032 * skill) * (pressed ? 1.3 : 1);
   const land = { x: clamp(o.to.x + gauss(w.rng) * sd, 0.5, PITCH.L - 0.5), y: clamp(o.to.y + gauss(w.rng) * sd, 0.5, PITCH.W - 0.5) };
   const d = hyp(land.x - c.x, land.y - c.y), { T } = airFlight(d);
+  c.face = Math.atan2(land.y - c.y, land.x - c.x);
   Object.assign(b, { state: 'air', owner: null, x: c.x, y: c.y, h: 0, from: { x: c.x, y: c.y }, to: land, t0: w.t, T, H: cross ? 3 + 0.06 * d : 2.5 + 0.13 * d,
     kind: o.type, intended: o.rec, passer: c, team, contested: false, odds: o.odds, zone: o.zone, ...releaseInfo(w, c) });
   const S = w.T[team].S;
@@ -3408,9 +3617,9 @@ function kickAir(w, c, o) {
     S.passes++; S.passLen += o.d; S.long++;
     log(w, `${tag(c)} ${o.type === 'switch' ? 'switches play to' : 'goes long to'} ${tag(o.rec)}`, 'pass', team);
   }
-  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: true, cross, team });
+  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: true, cross, team, type: o.type });
   c.mode = 'shape';
-  o.rec.mode = 'receive'; o.rec.target = land; o.rec.spd = o.rec.vmax;
+  o.rec.mode = 'receive'; o.rec.target = land; o.rec.spd = o.rec.vmax; o.rec.goAt = w.t + o.rec.react * 0.5;
   airChasers(w, team);
 }
 
@@ -3436,19 +3645,19 @@ function assignInterceptors(w, team) {
       let best = null;
       for (const fr of [0.2, 0.4, 0.6, 0.8, 1]) {
         const s = d * fr, pt = { x: b.x + ux * s, y: b.y + uy * s };
-        const slack = rollTime(sp, s) - (f.react + Math.max(0, hyp(f.x - pt.x, f.y - pt.y) - ENG.REACH) / f.vmax);
+        const slack = rollTime(sp, s) - (f.react + runT(f, pt.x, pt.y, ENG.REACH));
         if (!best || slack > best.slack) best = { pt, slack };
       }
       return { f, ...best };
     }).filter((q) => q.slack > -0.25).sort((a, b) => b.slack - a.slack);
-  for (const q of cands) { if (n++ >= 2) break; q.f.target = q.pt; q.f.spd = q.f.vmax; q.f.mode = 'intercept'; }
+  for (const q of cands) { if (n++ >= 2) break; q.f.target = q.pt; q.f.spd = q.f.vmax; q.f.mode = 'intercept'; q.f.goAt = w.t + q.f.react; }
 }
 // Under a high ball, the receiver and the nearest defenders go for where it lands.
 function airChasers(w, team) {
   const b = w.ball;
   const near = w.by[oppOf(team)].filter((f) => f.stun <= w.t && (f.pos !== 'GK' || inBox(team, b.to)))
     .sort((a, c) => hyp(a.x - b.to.x, a.y - b.to.y) - hyp(c.x - b.to.x, c.y - b.to.y)).slice(0, 2);
-  for (const f of near) { f.target = { x: b.to.x, y: b.to.y }; f.spd = f.vmax; f.mode = 'intercept'; }
+  for (const f of near) { f.target = { x: b.to.x, y: b.to.y }; f.spd = f.vmax; f.mode = 'intercept'; f.goAt = w.t + f.react; }
   if (b.kind === 'cross') {
     for (const p of w.by[team]) if (p.mode === 'box' && hyp(p.x - b.to.x, p.y - b.to.y) < 9) { p.target = { x: b.to.x, y: b.to.y }; p.spd = p.vmax; p.until = w.t + b.T + 0.4; }
   }
@@ -3477,6 +3686,12 @@ function shoot(w, c, header) {
   else { const s = w.rng() < 0.5 ? -1 : 1; to = { x: gx + (team === 'home' ? 1 : -1), y: MID + s * (4.2 + w.rng() * 4) }; }
   const dist0 = hyp(to.x - c.x, to.y - c.y);
   const b = w.ball;
+  c.face = Math.atan2(to.y - c.y, to.x - c.x);
+  // The keeper goes for it: gets there for a save, falls short for a goal.
+  if (result === 'saved' || result === 'goal') {
+    const reachY = result === 'saved' ? to.y : gk.y + clamp(to.y - gk.y, -2.2, 2.2) * 0.8;
+    gk.target = { x: gk.x, y: reachY }; gk.mode = 'dive'; gk.spd = 7; gk.until = w.t + 1;
+  }
   Object.assign(b, { state: 'shot', owner: null, from: { x: c.x, y: c.y }, to, t0: w.t, T: Math.max(0.15, dist0 / (header ? 14 : 24)), result, blocker, shooter: c, team, h: 0 });
   const d = hyp(gx - c.x, MID - c.y);
   if (w.lastShotAt != null && w.t - w.lastShotAt < 3 && w.lastShotTeam === team) moment(w, 'rebound', team, { ids: [c.id], x: c.x, y: c.y, xg: sm.xg });
@@ -3545,8 +3760,18 @@ function takeBall(w, p, how) {
     return endRun(w, 'offside', oppOf(p.team));
   }
   const passer = b.passer, info = { pressers: b.pressers, lineAt: b.lineAt, passerU: b.passerU, kind: b.kind, from: b.from };
-  Object.assign(b, { state: 'held', owner: p, team: p.team, h: 0, vx: 0, vy: 0, offIds: null, intended: null });
-  p.gotAt = w.t; p.mode = 'carry'; p.heavy = false;
+  // First touch: the ball is cushioned, not stopped dead, and runs on a little.
+  w.lastHolder = b.state === 'held' && b.owner ? b.owner.id : w.lastHolder;
+  // First touch: cushioned, and it runs on a little the way it came.
+  const inc = hyp(b.vx, b.vy), rx = b.x - p.x, ry = b.y - p.y, rl = hyp(rx, ry) || 1;
+  const cush = how === 'control' || how === 'loose' ? clamp((0.2 - 0.007 * at(p, 'touch')) * inc, 0, 1.6) : 0;
+  Object.assign(b, { state: 'held', owner: p, team: p.team, h: 0, offIds: null, intended: null,
+    rel: clamp(rl, 0.4, 1.1), rv: cush, ux: inc > 1 ? b.vx / inc : rx / rl, uy: inc > 1 ? b.vy / inc : ry / rl, vx: 0, vy: 0 });
+  p.gotAt = w.t; p.mode = 'carry'; p.heavy = false; p.touchOut = false;
+  if (p.order && p.order.kind === 'run' && p.team === b.team && wasPass) { p.order.found = true; if (!p.order.done) { p.order.done = true; p.order.ok = true; p.order.at = w.t; } }
+  // A man you told someone to press or mark: did he get it, and was ours close?
+  for (const d of w.by[oppOf(p.team)]) if (d.order && (d.order.kind === 'mark' || d.order.kind === 'press') && d.order.vsP === p && p.team !== prev) d.order.lostHim = (d.order.lostHim || 0) + 1;
+  for (const d of w.by[oppOf(p.team)]) if (d.order && d.order.kind === 'mark' && d.order.vsP === p && p.team === prev) { if (hyp(d.x - p.x, d.y - p.y) < 3) d.order.tight = (d.order.tight || 0) + 1; else d.order.loose = (d.order.loose || 0) + 1; }
   p.nextDecide = w.t + clamp(0.52 - 0.012 * at(p, 'touch') + { slow: 0.08, normal: 0, fast: -0.07 }[w.T[p.team].ins.tempo], 0.18, 0.6);
   if (p.team !== prev) {
     if (wasPass && w.passLog?.length && w.passLog.at(-1).ok === null) w.passLog.at(-1).ok = false;
@@ -3602,6 +3827,7 @@ function passDone(w, passer, rec, info) {
 // The ball has changed hands.
 function turnover(w, p, how) {
   const team = p.team, lost = oppOf(team), St = w.T[team].S, Sl = w.T[lost].S;
+  w.lastLoser = w.lastHolder;
   const cpr = w.t - w.T[team].lostAt <= 5 && w.T[team].lostAt >= 0;
   // Won it back within 8 s of them having it (from the start, or since we lost it).
   if (w.t - w.T[team].offBall <= 8 && how !== 'save' && how !== 'claim') w.T[team].F.quickWin = true;
@@ -3616,6 +3842,7 @@ function turnover(w, p, how) {
     moment(w, 'trapWin', team, { ids: [p.id], x: p.x, y: p.y });
   }
   (w.turnovers ||= []).push({ team, x: p.x, y: p.y, t: w.t, how });
+  for (const d of w.by[team]) if (d.order && (d.order.kind === 'press' || d.order.kind === 'mark') && hyp(d.x - p.x, d.y - p.y) < 4 && w.byId[w.lastLoser]?.id === d.order.vsP?.id) d.order.won = (d.order.won || 0) + 1;
   if (how !== 'save' && how !== 'claim') {
     if (cpr) { St.cpRegains++; w.T[team].F.cpRegain = true; moment(w, 'counterPress', team, { ids: [p.id], x: p.x, y: p.y }); }
     if (u >= PITCH.L / 2 + 5) { St.highRegains++; w.T[team].F.highRegain = true; if (!cpr) moment(w, 'regainHigh', team, { ids: [p.id], x: p.x, y: p.y, u }); }
@@ -3662,8 +3889,9 @@ function tackleTick(w) {
   for (const d of w.by[opp]) {
     if (d.stun > w.t || d.pos === 'GK') continue;
     const dd = hyp(d.x - c.x, d.y - c.y);
-    if (dd > 1.25) continue;
+    // A man pressing can lunge in from a stride and a half; anyone else has to be touch-tight.
     const engaged = d.mode === 'press' || d.mode === 'intercept';
+    if (dd > (engaged ? 1.6 : 1.25)) continue;
     let rate = (engaged ? 1 : 0.35) * TACKLE_RATE[ins.tackling] * (0.55 + 0.045 * at(d, 'tackling')) * (d.R.tackle || 1);
     if (depthOf(opp, c.x) < 24) rate *= inBox(team, c) ? (ins.tackling === 'hard' ? 1.6 : 1.1) : 1.8;
     else if (engaged && counterPressing(w, opp)) rate *= 2;
@@ -3772,9 +4000,15 @@ function engStep(w) {
   if (b.state === 'held') {
     const c = b.owner;
     // Closed down, he has to get rid of it sooner.
-    if (c.nextDecide - w.t > 0.15 && nearestDist(c, w.by[oppOf(c.team)]) < 1.3) c.nextDecide = w.t + 0.15;
-    if (w.t >= c.nextDecide) { decide(w, c); if (w.outcome) return; }
+    if (c.nextDecide - w.t > 0.15 && nearestDist(c, w.by[oppOf(c.team)]) < 1.5) c.nextDecide = w.t + 0.15;
+    // He plays it when he is back on the ball (a heavy touch costs a moment).
+    const onIt = hyp(b.x - c.x, b.y - c.y) < 1.15 || w.t > c.nextDecide + 0.5;
+    if (w.t >= c.nextDecide && onIt) { decide(w, c); if (w.outcome) return; }
   }
+  // Where the ball has been lately, side to side: the shape drifts across
+  // with it rather than chasing every square pass.
+  w.bsy = w.bsy == null ? b.y : w.bsy + (b.y - w.bsy) * (dt / 1.1);
+  w.bsx = w.bsx == null ? b.x : w.bsx + (b.x - w.bsx) * (dt / 0.8);
   perTick(w);
   move(w);
   ballTick(w); if (w.outcome) return;
@@ -3832,8 +4066,8 @@ function perTick(w) {
     const lu = depthOf(dteam, land.x);
     if (gk.stun <= w.t && lu < 26 && Math.abs(land.y - MID) < 22) {
       const sweep = gk.R.sweep > 0.5 ? 1 : at(gk, 'sweeping') / 20;
-      const tg = hyp(gk.x - land.x, gk.y - land.y) / gk.vmax;
-      const tAtt = Math.min(...w.by[b.team].map((p) => hyp(p.x - land.x, p.y - land.y) / p.vmax));
+      const tg = runT(gk, land.x, land.y);
+      const tAtt = Math.min(...w.by[b.team].map((p) => runT(p, land.x, land.y)));
       if (tg < tAtt * (0.75 + 0.35 * sweep)) { gk.target = land; gk.spd = gk.vmax; gk.mode = 'sweep'; }
     }
   }
@@ -3845,7 +4079,7 @@ function meetPoint(p, b) {
   let best = { x: b.x + ux * stop, y: b.y + uy * stop }, bs = Infinity;
   for (let s = 0; s <= stop; s += Math.max(1, stop / 10)) {
     const pt = { x: b.x + ux * s, y: b.y + uy * s };
-    const tb = rollTime(sp, s), tp = Math.max(0, hyp(p.x - pt.x, p.y - pt.y) - ENG.REACH) / p.vmax;
+    const tb = rollTime(sp, s), tp = runT(p, pt.x, pt.y, ENG.REACH);
     const slack = tp - tb;
     if (slack < 0) return pt;
     if (slack < bs) { bs = slack; best = pt; }
@@ -3853,35 +4087,127 @@ function meetPoint(p, b) {
   return best;
 }
 
-// Everyone moves towards his target: capped speed and acceleration, easing
-// off in time to stop on the spot, slower to turn than to speed up.
+// Movement: what a footballer's body allows. Each player has a target and a
+// speed cap set by what he is doing; here that becomes running.
+//  - Urgent jobs (pressing, tracking a runner, chasing a ball) are run flat
+//    out and braked late; holding shape is a walk or a jog, slower the
+//    closer he already is, and he stands still once he's there.
+//  - A man following someone (marking, pressing) matches that man's pace.
+//  - Pace builds up: hardest from a standstill, nothing left at top speed.
+//    Stopping is quicker than starting, and turning at a sprint is an arc.
+//  - He faces somewhere: the way he runs, or the ball when he is adjusting.
+//    Backwards and sideways he is much slower, so a defender facing the ball
+//    has to turn before he can chase a runner, and that costs him.
+//  - Nobody runs through anybody.
+const URGENT = new Set(['press', 'track', 'chase', 'run', 'intercept', 'sweep', 'cover', 'receive', 'box', 'dive']);
+const angDiff = (a, b) => { let d = a - b; if (d > Math.PI) d -= 2 * Math.PI * Math.ceil((d - Math.PI) / (2 * Math.PI)); else if (d < -Math.PI) d += 2 * Math.PI * Math.ceil((-Math.PI - d) / (2 * Math.PI)); return d; };
 function move(w) {
-  const dt = ENG.DT, b = w.ball;
+  const dt = ENG.DT, b = w.ball, held = b.state === 'held' ? b.owner : null;
   for (const p of w.players) {
     const stunned = p.stun > w.t;
+    // Until he has reacted to the ball being played, he carries on as he was.
+    if (p.goAt > w.t && held !== p) {
+      p.x = clamp(p.x + p.vx * dt, -1, PITCH.L + 1); p.y = clamp(p.y + p.vy * dt, -1, PITCH.W + 1);
+      const k = (w.tick & 7) * 2; p.vh[k] = p.vx; p.vh[k + 1] = p.vy;
+      continue;
+    }
     let cap = stunned ? 1.2 : p.spd;
-    // Jockeying backwards towards your own goal is slower than running forwards.
-    if (p.mode === 'press' && depthOf(p.team, p.target.x) < depthOf(p.team, p.x)) cap = Math.min(cap, p.vmax * 0.8);
-    if (b.state === 'held' && b.owner === p) cap = p.mode === 'dribble' || p.mode === 'takeOn' ? Math.min(p.spd, carryOf(p) + 0.4) : 1.2;
-    const dx = p.target.x - p.x, dy = p.target.y - p.y, d = hyp(dx, dy);
-    const want = d < 0.2 ? 0 : Math.min(cap, d / dt, Math.sqrt(2 * p.acc * d));
-    const tvx = d ? (dx / d) * want : 0, tvy = d ? (dy / d) * want : 0;
-    const turning = p.vx * tvx + p.vy * tvy < 0;
-    const ax = tvx - p.vx, ay = tvy - p.vy, a = hyp(ax, ay), lim = p.acc * dt * (turning ? 0.55 : 1);
-    const k = a > lim ? lim / a : 1;
-    p.vx += ax * k; p.vy += ay * k;
+    if (held === p) cap = p.mode === 'dribble' || p.mode === 'takeOn' ? Math.min(p.spd, carryOf(p) + 0.4) : 1.2;
+    // Where to steer: his target, or, dribbling, the ball he has just knocked on.
+    const tx = p.target.x, ty = p.target.y;
+    const dx = tx - p.x, dy = ty - p.y, d = hyp(dx, dy);
+    // Following a man: his velocity, plus closing the gap.
+    let fx = 0, fy = 0;
+    const urgent = URGENT.has(p.mode) || held === p;
+    // A follower reacts to what his man did a reaction time ago, which is the
+    // half-yard a forward's change of pace or direction buys him.
+    const lk = ((w.tick - p.lag) & 7) * 2;
+    if ((p.mode === 'mark' || p.mode === 'track') && p.marking) { const a = w.byId[p.marking]; if (a) { fx = a.vh[lk]; fy = a.vh[lk + 1]; } }
+    else if ((p.mode === 'press' || p.mode === 'contain' || p.mode === 'screen') && held && held.team !== p.team) { fx = held.vh[lk] * 0.85; fy = held.vh[lk + 1] * 0.85; }
+    else if (p.mode === 'shape' && p.tvx !== undefined && d < 8) {
+      // Near his spot, he moves with it; far off, he just runs to it.
+      fx = p.tvx; fy = p.tvy; const f = hyp(fx, fy), m = cap * 0.6 * (1 - d / 8);
+      if (f > m) { fx *= m / Math.max(f, 1e-6); fy *= m / Math.max(f, 1e-6); }
+    }
+    let app = urgent ? Math.sqrt(2 * ENG.BRAKE * 0.9 * Math.max(0, d - 0.1)) : d < 0.4 ? 0 : 0.3 + 1.2 * d;
+    if (held === p && d < 0.6) app = 0;
+    let tvx = fx + (d ? (dx / d) * app : 0), tvy = fy + (d ? (dy / d) * app : 0);
+    let mv = hyp(tvx, tvy);
+    if (mv > cap) { tvx *= cap / mv; tvy *= cap / mv; mv = cap; }
+    // A sharp turn onto a near spot means slowing down for it: the fastest he
+    // can go and still make the turn is set by his grip and the radius.
+    const sp1 = hyp(p.vx, p.vy);
+    if (sp1 > 2 && mv > 1.5 && d > 0.3) {
+      const cosT = (p.vx * tvx + p.vy * tvy) / (sp1 * mv), sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
+      if (cosT < 0.95) {
+        const r = cosT < 0 ? d / 2 : d / (2 * Math.max(sinT, 0.05));
+        const vt = Math.max(1.5, Math.sqrt(ENG.LAT * 1.35 * r));
+        if (mv > vt) { tvx *= vt / mv; tvy *= vt / mv; mv = vt; }
+      }
+    }
+    // Which way he faces: run the way you're going when it's far or urgent;
+    // otherwise keep your eyes on the ball (or the man on it) and shuffle.
+    const ball = held && held !== p ? held : b;
+    const mvAng = mv > 0.05 ? Math.atan2(tvy, tvx) : p.face;
+    const jockey = (p.mode === 'press' || p.mode === 'contain') && held && held.team !== p.team && hyp(held.x - p.x, held.y - p.y) < 7;
+    let want = p.face;
+    if (held === p) want = mv > 0.8 ? mvAng : p.face;
+    else if (p.mode === 'dive') want = p.face;
+    else if (mv > 0.55 * p.vmax || (mv > 2.2 && d > 6)) want = jockey ? Math.atan2(ball.y - p.y, ball.x - p.x) : mvAng;
+    else {
+      const toBall = Math.atan2(ball.y - p.y, ball.x - p.x);
+      want = !jockey && mv > 0.4 && Math.abs(angDiff(mvAng, toBall)) < 1.2 ? mvAng : toBall;
+    }
+    const sp0 = hyp(p.vx, p.vy), turn = (p.mode === 'dive' ? 0 : 11 - 0.75 * sp0) * dt;
+    const da = angDiff(want, p.face);
+    p.face += clamp(da, -turn, turn);
+    // Speed allowed in that direction, given which way he's facing.
+    if (mv > 0.1 && p.mode !== 'dive') {
+      const rel = Math.abs(angDiff(mvAng, p.face));
+      const dirCap = rel < 0.9 ? p.vmax : rel < 2.0 ? p.vmax * (1 - 0.4 * (rel - 0.9) / 1.1) : p.vmax * (0.6 - 0.18 * (rel - 2.0) / 1.14);
+      if (mv > dirCap) { tvx *= dirCap / mv; tvy *= dirCap / mv; }
+    }
+    // Acceleration: along the run (push, or brake) and across it (turning).
+    let ax = tvx - p.vx, ay = tvy - p.vy;
+    if (p.mode === 'dive') { const lim = 14 * dt, a = hyp(ax, ay); if (a > lim) { ax *= lim / a; ay *= lim / a; } }
+    else if (sp0 > 1.2) {
+      const ux = p.vx / sp0, uy = p.vy / sp0;
+      let par = ax * ux + ay * uy;
+      let nx = ax - par * ux, ny = ay - par * uy;
+      const push = Math.max(0.7, p.acc * (1 - sp0 / (p.vmax + 0.3)));
+      par = clamp(par, -ENG.BRAKE * dt, push * dt);
+      const n = hyp(nx, ny), latLim = ENG.LAT * dt * (sp0 < 4 ? 1.35 : 1);
+      if (n > latLim) { nx *= latLim / n; ny *= latLim / n; }
+      ax = par * ux + nx; ay = par * uy + ny;
+    } else {
+      const lim = p.acc * dt, a = hyp(ax, ay);
+      if (a > lim) { ax *= lim / a; ay *= lim / a; }
+    }
+    p.vx += ax; p.vy += ay;
     p.x = clamp(p.x + p.vx * dt, -1, PITCH.L + 1); p.y = clamp(p.y + p.vy * dt, -1, PITCH.W + 1);
+    const k = (w.tick & 7) * 2; p.vh[k] = p.vx; p.vh[k + 1] = p.vy;
+  }
+  // Bodies: team-mates keep a metre apart, opponents can get closer (a
+  // tackle is a contest for the same ground) but never stand on each other.
+  const P = w.players;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i];
+    for (let j = i + 1; j < P.length; j++) {
+      const c = P[j], dx = c.x - a.x, dy = c.y - a.y;
+      if (dx > 1.1 || dx < -1.1 || dy > 1.1 || dy < -1.1) continue;
+      const min = a.team === c.team ? 1.05 : 0.8, d = hyp(dx, dy);
+      if (d >= min) continue;
+      const push = (min - d) / 2, ux = d > 1e-6 ? dx / d : 1, uy = d > 1e-6 ? dy / d : 0;
+      // The man on the ball holds his ground; the other gives way.
+      const ka = a === held ? 0 : c === held ? 2 : 1, kc = 2 - ka;
+      a.x -= ux * push * ka; a.y -= uy * push * ka; c.x += ux * push * kc; c.y += uy * push * kc;
+    }
   }
 }
 
 function ballTick(w) {
   const b = w.ball, dt = ENG.DT;
-  if (b.state === 'held') {
-    const c = b.owner, sp = hyp(c.vx, c.vy);
-    const dir = sp > 0.5 ? { x: c.vx / sp, y: c.vy / sp } : { x: c.team === 'home' ? 1 : -1, y: 0 };
-    b.x = c.x + dir.x * 0.6; b.y = c.y + dir.y * 0.6; b.h = 0;
-    return;
-  }
+  if (b.state === 'held') return dribbleTick(w);
   if (b.state === 'shot') {
     const f = clamp((w.t - b.t0) / b.T, 0, 1);
     b.x = b.from.x + (b.to.x - b.from.x) * f; b.y = b.from.y + (b.to.y - b.from.y) * f;
@@ -3948,6 +4274,35 @@ function ballTick(w) {
   }
   if (hyp(b.vx, b.vy) < 0.05) { b.vx = 0; b.vy = 0; if (b.kind !== 'loose') { b.kind = 'loose'; b.tried = new Set(); } }
 }
+// The ball at a carrier's feet is still a ball. Running, he knocks it on a
+// little ahead and runs onto it: short touches with men around him, longer
+// ones into open grass. Standing, it sits just in front of him, on the side
+// he faces. The touch is tracked relative to his stride (he has it
+// throughout); a pass or shot waits until he is back on it.
+function dribbleTick(w) {
+  const b = w.ball, c = b.owner, dt = ENG.DT, sp = hyp(c.vx, c.vy);
+  b.h = 0;
+  const running = sp > 1.6 && (c.mode === 'dribble' || c.mode === 'takeOn');
+  if (running && !(b.rel > 0.45)) {
+    // A touch, into his stride.
+    const free = nearestDist(c, w.by[oppOf(c.team)]);
+    b.rv = clamp(1.6 + 0.45 * (free - 2), 1.6, 4.6) * (c.mode === 'takeOn' && free < 3 ? 1.3 : 1);
+    b.rel = 0.5; b.ux = c.vx / sp; b.uy = c.vy / sp;
+  } else if (running) {
+    b.rel = Math.max(0.4, b.rel + b.rv * dt); b.rv -= ENG.DRIB_F * dt;
+    // He steers; the ball he touched keeps most of its line.
+    const k = 0.25; b.ux = b.ux * (1 - k) + (c.vx / sp) * k; b.uy = b.uy * (1 - k) + (c.vy / sp) * k;
+    const n = hyp(b.ux, b.uy) || 1; b.ux /= n; b.uy /= n;
+  } else {
+    // At his feet.
+    b.rel = (b.rel || 0.5) + (0.45 - (b.rel || 0.5)) * 0.5; b.rv = 0;
+    const k = 0.4; b.ux = (b.ux ?? 1) * (1 - k) + Math.cos(c.face) * k; b.uy = (b.uy ?? 0) * (1 - k) + Math.sin(c.face) * k;
+    const n = hyp(b.ux, b.uy) || 1; b.ux /= n; b.uy /= n;
+  }
+  b.x = c.x + b.ux * b.rel; b.y = c.y + b.uy * b.rel;
+  b.vx = c.vx; b.vy = c.vy;
+  c.touchOut = b.rel > 1.1;
+}
 const segDist = (p, x0, y0, x1, y1) => {
   const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
   const t = l2 ? clamp(((p.x - x0) * dx + (p.y - y0) * dy) / l2, 0, 1) : 0;
@@ -3995,12 +4350,13 @@ function endRun(w, kind, team, extra = {}) {
 }
 
 // What each player is doing, kept in replay frames so the plan can be drawn.
-const MODE_LIST = ['shape', 'press', 'cover', 'mark', 'track', 'run', 'box', 'support', 'contain', 'screen', 'intercept'];
+const MODE_LIST = ['shape', 'press', 'cover', 'mark', 'track', 'run', 'box', 'support', 'contain', 'screen', 'intercept',
+  'carry', 'dribble', 'takeOn', 'receive', 'chase', 'keeper', 'sweep', 'hold', 'shield', 'dive'];
 const MODE_CODE = Object.fromEntries(MODE_LIST.map((m, i) => [m, i]));
 // Run one passage of play to the end. With `record`, keep every frame.
 function engRun(input, record = false) {
   const w = engCreate(input);
-  const snap = () => w.frames.push({ p: w.players.map((p) => [p.x, p.y, MODE_CODE[p.mode] || 0, p.target.x, p.target.y]), b: [w.ball.x, w.ball.y, w.ball.h || 0, w.ball.state === 'held' ? w.players.indexOf(w.ball.owner) : -1] });
+  const snap = () => w.frames.push({ p: w.players.map((p) => [p.x, p.y, MODE_CODE[p.mode] || 0, p.target.x, p.target.y, p.face, hyp(p.vx, p.vy)]), b: [w.ball.x, w.ball.y, w.ball.h || 0, w.ball.state === 'held' ? w.players.indexOf(w.ball.owner) : -1] });
   if (record) snap();
   while (!w.outcome) { engStep(w); if (record) snap(); }
   return w;
@@ -4130,10 +4486,27 @@ const FLAG_KEYS = ['half', 'final3', 'box', 'shot', 'goal', 'highRegain', 'cpReg
 function newAgg() {
   const flags = () => Object.fromEntries(FLAG_KEYS.map((k) => [k, 0]));
   return { n: 0, flags: { home: flags(), away: flags() }, S: { home: newStats(), away: newStats() }, shots: [], regains: [], outcomes: {}, moments: {}, momentRuns: {},
-    causes: { home: {}, away: {} }, counterShots: { home: 0, away: 0 }, passes: [], t: 0, rows: [] };
+    causes: { home: {}, away: {} }, counterShots: { home: 0, away: 0 }, passes: [], t: 0, rows: [], orders: [] };
+}
+// How each of the coach's orders went in one passage, in words a coach uses.
+function orderResult(o) {
+  switch (o.kind) {
+    case 'run': return o.found ? { ok: true, text: 'made the run and got the ball' } : o.done ? { ok: true, text: 'made the run; the ball didn’t come' } : { ok: false, text: 'never got there' };
+    case 'pass': return o.ok ? { ok: true, text: 'played the pass' } : o.note ? { ok: false, text: 'the pass wasn’t on' } : { ok: null, text: 'never got the ball' };
+    case 'carry': return o.ok ? { ok: true, text: 'carried it there' } : o.tried ? { ok: false, text: 'started the carry, didn’t get there' } : { ok: null, text: 'never got the ball' };
+    case 'press': return o.presses ? { ok: true, text: `pressed him ${o.presses === 1 ? 'once' : o.presses + ' times'}${o.won ? ', and won it' : ''}` } : { ok: null, text: 'he never had the ball' };
+    case 'mark': return o.loose ? { ok: false, text: 'lost his man when the ball came' } : o.tight ? { ok: true, text: 'was tight when his man got it' } : { ok: true, text: 'kept his man out of it' };
+    case 'hold': return { ok: true, text: 'held his position' };
+    default: return { ok: null, text: '' };
+  }
 }
 function addRun(agg, w) {
   agg.n++; agg.t += w.t;
+  (w.orders || []).forEach((o, i) => {
+    const r = (agg.orders[i] ||= { kind: o.kind, slot: o.slot, n: 0, ok: 0, na: 0, found: 0, won: 0 });
+    const res = orderResult(o);
+    r.n++; if (res.ok === true) r.ok++; if (res.ok === null) r.na++; if (o.found) r.found++; if (o.won) r.won++;
+  });
   for (const t of ['home', 'away']) {
     for (const k of FLAG_KEYS) if (w.T[t].F[k]) agg.flags[t][k]++;
     for (const k in w.T[t].S) agg.S[t][k] += w.T[t].S[k];
@@ -4172,7 +4545,7 @@ function compareMetric(a, b, key) {
   return { d: 100 * d, sig: up + down >= 4 && Math.abs(d) > 2 * se };
 }
 function runInput(teams, setup, seed, maxT, vary = true) {
-  return { teams, pos: setup.pos, ball: setup.ball, poss: setup.poss, holder: setup.holder, transition: setup.transition, seed, maxT, vary };
+  return { teams, pos: setup.pos, ball: setup.ball, poss: setup.poss, holder: setup.holder, transition: setup.transition, orders: setup.orders, seed, maxT, vary };
 }
 // Synchronous batch (the page runs it in slices so the screen stays live).
 function engBatch(teams, setup, n = TEST_RUNS, seed = TEST_SEED, from = 0, agg = newAgg(), maxT) {
@@ -4419,57 +4792,57 @@ function summarize(w, sit) {
 // Goals and hints come from searching each lesson's levers over 200 varied runs:
 // the start fails, the principle the lesson teaches earns the pass, and the
 // third star needs it combined with a second idea.
-const GOALS_BEAT_PRESS = [{ key: 'lostOwnThird', op: '<=', v: 14 }, { key: 'half', op: '>=', v: 62 }, { key: 'half', op: '>=', v: 72 }];
+const GOALS_BEAT_PRESS = [{ key: 'half', op: '>=', v: 59 }, { key: 'lostOwnThird', op: '<=', v: 8 }, { key: 'half', op: '>=', v: 66 }];
 const LESSONS = [
   { id: 'press-unit', title: 'Press as a unit', sit: 'press', opp: 'castello', style: 'balanced', set: { engage: 'mid', line: 'standard', press: 'normal' },
     levers: ['engage', 'line', 'press', 'pressTo', 'marking'],
-    idea: 'Where your press starts decides what it can win. Wait on halfway and a patient side walks the ball out of its own third; step up and their centre-backs and keeper have to play under pressure, where one bad touch is a chance.',
+    idea: 'Where your press starts decides what it can win. Wait on halfway and a patient side walks the ball out of its own third; step up and their centre-backs and keeper have to play under pressure, where one bad touch is a chance. But the forwards can’t go alone: if the defence stays back, the gap behind the press is where they play.',
     task: 'Castello play out from the back. Win the ball back in their half.',
-    goals: [{ key: 'winHigh', op: '>=', v: 25 }, { key: 'shotFor', op: '>=', v: 14 }, { key: 'winHigh', op: '>=', v: 27 }],
-    hints: ['Where does your press start? Look at the line of engagement.', 'Pressing harder from halfway only chases them. Start the press where their build-up is.', 'Watch a run: when you win it high, how far is it to their goal?'],
-    debrief: 'The line of engagement is the lever that matters here: pressing from their third turns their build-up into your best chance to score, because every ball you win is 30 m from goal. Pressing intensity and traps only refine a press that starts in the right place.' },
+    goals: [{ key: 'winHigh', op: '>=', v: 16 }, { key: 'shotFor', op: '>=', v: 11 }, { key: 'shotAg', op: '<=', v: 4 }],
+    hints: ['Where does your press start? Look at the line of engagement.', 'Pressing high with the defence back where it was leaves a gap behind the press. Push the line up with it.', 'Watch a run: when they do get through your press, how much room is there behind it?'],
+    debrief: 'The line of engagement wins the ball: pressing from their third turns their build-up into your best chance to score. The defensive line keeps it safe: step it up with the press and the pass that beats your forwards lands among your defenders, not in space.' },
   { id: 'beat-press', title: 'Beat the press', sit: 'buildup', opp: 'hartwell', style: 'balanced', set: { buildUp: 'short', width: 'narrow', passing: 'short' },
     levers: ['passing', 'width', 'buildUp', 'tempo', 'focus'], roleLevers: ['GK', 'DM'],
-    idea: 'Short passing out from the back is exactly what a pressing side wants: every pass goes to someone they can reach. To beat the press you have to be willing to play past the first line, not just around it.',
+    idea: 'Short passes between players standing close together is exactly what a pressing side wants: every pass goes to someone they can reach. To beat the press you make the pitch big, and you are willing to play past the first line, not just around it.',
     task: 'Hartwell press everything. Get the ball into their half without losing it in your own third.',
     goals: GOALS_BEAT_PRESS,
-    hints: ['Watch where you lose it. Who is the pass to, and how many of them are near him?', 'Going longer from the back skips their first line of pressers.', 'Mixing longer passes into the build-up means they can’t squeeze every short option. Spreading wider on its own won’t do it.'],
-    debrief: 'The ball that beats a press goes past the first line. Build up longer, or mix longer passes into your play, and the pressers can’t just squeeze the short options. Width alone made it worse here: short passes into wide areas are still the passes they are waiting for.' },
+    hints: ['Watch where you lose it. Who is the pass to, and how many of them are near him?', 'Mix longer passes into your play, so they can’t squeeze every short option.', 'Spread out: width puts more ground between their pressers, and each one has further to run.'],
+    debrief: 'Against a press, distances decide everything. Spread wide and each presser has more ground to cover; mix in longer passes and they can’t squeeze you without leaving space behind. Either helps; together they take you through.' },
   { id: 'rest-defence', title: 'Rest defence', sit: 'rest', opp: 'solano', style: 'gegenpress', set: { onLoss: 'mixed' },
     levers: ['onLoss', 'line', 'engage'], roleLevers: ['FB', 'WB', 'DM'],
     idea: 'When you attack, the players you leave behind the ball decide what happens when you lose it. Wing-backs bombing on and a sitting anchor leave a pacy front three running at two centre-backs.',
     task: 'You lose the ball on halfway with your wing-backs high. Solano break at pace. Stop them reaching your box.',
-    goals: [{ key: 'boxAg', op: '<=', v: 40 }, { key: 'shotAg', op: '<=', v: 26 }, { key: 'quickWin', op: '>=', v: 70 }],
-    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'A full-back who tucks inside while you attack is already in the middle when you lose it.'],
-    debrief: 'The best rest defence stops the counter before it starts: a ball-winning midfielder steps into the first pass, and an inverted full-back beside him means there is help when he does. Dropping the line deeper only gave their runners a longer run at your box.' },
+    goals: [{ key: 'boxAg', op: '<=', v: 27 }, { key: 'shotAg', op: '<=', v: 25 }, { key: 'quickWin', op: '>=', v: 50 }],
+    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'Counter-pressing with everyone sounds brave. Test it: without a man screening, the first pass beats it.'],
+    debrief: 'The best rest defence stops the counter before it starts: a ball-winning midfielder steps into the first pass. Throwing everyone at the ball made it worse here, because one pass past the swarm and Solano were running at your back line.' },
   { id: 'low-block', title: 'Break down a low block', sit: 'lowblock', opp: 'staldric', style: 'balanced', set: { tempo: 'slow', focus: 'middle' }, roles: { 8: 'iw', 10: 'iw' },
     levers: ['tempo', 'focus', 'width', 'runs', 'crossing', 'final'], roleLevers: ['W', 'CM'],
-    idea: 'A deep, narrow block wants you in the middle, where it has the numbers. Inverted wingers drifting inside and slow passing through the centre play straight into it.',
+    idea: 'A deep, narrow block is happy to let you pass in front of it. Inverted wingers coming short and slow passing through the middle give it nothing to worry about. What hurts a block is players running beyond it.',
     task: 'St Aldric’s sit in a narrow five at the back. Get into their box.',
-    goals: [{ key: 'box', op: '>=', v: 28 }, { key: 'shotFor', op: '>=', v: 38 }, { key: 'box', op: '>=', v: 40 }],
-    hints: ['Where are your wingers standing? Where is the space against a narrow block?', 'A winger who stays wide pulls their wing-back out and opens the channel inside him.', 'Once the block is stretched, someone has to run into the gap: try a central midfielder as a mezzala.'],
-    debrief: 'Width first, then runs into the half-spaces. Wingers who stay wide make the back five defend the whole pitch; a mezzala then arrives in the channel between wing-back and centre-back, which is exactly the gap width opened.' },
+    goals: [{ key: 'box', op: '>=', v: 30 }, { key: 'shotFor', op: '>=', v: 44 }, { key: 'box', op: '>=', v: 35 }],
+    hints: ['Watch your wingers. Do they ever run beyond the back five?', 'An inside forward attacks the box from the flank instead of coming short.', 'A midfielder arriving late in the half-space is the man nobody picks up: try a mezzala.'],
+    debrief: 'Against a low block the ball in front of it is safe for them; runs beyond it are not. An inside forward attacking the box from wide and a mezzala arriving in the channel give their back five runners to track, and that is when the gaps open.' },
   { id: 'counter', title: 'Counter at speed', sit: 'counter', opp: 'castello', style: 'balanced', set: { onWin: 'hold', tempo: 'slow', passing: 'short' },
     levers: ['onWin', 'tempo', 'passing', 'runs', 'dribbling'], roleLevers: ['ST', 'W'],
     idea: 'The seconds after winning the ball are when the opponent is least organised. Short, slow passing gives them the time to get back; forward passes played quickly don’t.',
     task: 'You win it on halfway while Castello are attacking. Get a shot away.',
-    goals: [{ key: 'shotFor', op: '>=', v: 30 }, { key: 'box', op: '>=', v: 28 }, { key: 'shotFor', op: '>=', v: 46 }],
-    hints: ['Watch the first pass after you win it. Which way does it go?', 'Short passes keep the ball but let them recover. Go more direct.', 'Direct passing works best when it is quick too: raise the tempo as well.'],
-    debrief: 'A counter lives on its first passes: direct, forward and quick, into runners while their shape is broken. Each on its own helps; together they more than double your shots, because the ball arrives before the defence does.' },
+    goals: [{ key: 'shotFor', op: '>=', v: 20 }, { key: 'box', op: '>=', v: 9 }, { key: 'shotFor', op: '>=', v: 30 }],
+    hints: ['Watch the first pass after you win it. Which way does it go?', 'Short passes keep the ball but let them recover. Go more direct.', 'Direct is half of it. Tell them to break the moment you win it, or play quicker.'],
+    debrief: 'A counter lives on its first passes: direct and forward, into runners while their shape is broken, and straight away. Direct passing alone more than triples your shots; with the whole side breaking on the turnover it goes further, because the ball arrives before their defence does.' },
   { id: 'edge', title: 'Defend the edge of the box', sit: 'edge', opp: 'rheinfeld', style: 'balanced', set: { press: 'less', marking: 'zonal', compact: 'wide' },
     levers: ['press', 'tackling', 'marking', 'compact', 'line'],
     idea: 'Near your own box, time on the ball is a chance. Someone must step out to the ball straight away, and the others must be close enough to help.',
     task: 'Rheinfeld have it 27 m out with runners around your box. Stop the shot.',
-    goals: [{ key: 'shotAg', op: '<=', v: 40 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 32 }],
-    hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'With the ball pressed, the block behind can be tighter, or the tackles can go in.'],
-    debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. A tighter block behind the pressure then takes away the pass that beats it.' },
+    goals: [{ key: 'shotAg', op: '<=', v: 46 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 38 }],
+    hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'With the ball pressed, a narrower block behind takes away the pass that beats the pressure.'],
+    debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. A narrow block behind the pressure then takes away the pass into the box, so pressing and compactness work as a pair.' },
   { id: 'overload', title: 'Overload the flank', sit: 'overload', opp: 'kingsbridge', style: 'balanced', set: { dribbling: 'less', crossing: 'often' }, roles: { 1: 'dfb', 4: 'dfb' },
     levers: ['dribbling', 'crossing', 'width', 'runs', 'final'], roleLevers: ['FB', 'W'],
     idea: 'A winger alone against a full-back, with help coming, is not an attack. Two against one is: a full-back overlapping means the defender has to choose, and the winger can go the other way.',
     task: 'Your winger has it on the right, level with their box. Get into the box.',
-    goals: [{ key: 'box', op: '>=', v: 14 }, { key: 'shotFor', op: '>=', v: 28 }, { key: 'box', op: '>=', v: 26 }],
-    hints: ['Watch your right-back. Does he join in?', 'A wing-back or attacking full-back overlaps and makes it two against one.', 'Once the defender has two to watch, let your winger take him on.'],
-    debrief: 'An overlapping full-back turns one against one into two against one. The defender has to choose, and whichever he picks, the other is free: with the winger encouraged to dribble, he goes inside the man who is watching the overlap.' },
+    goals: [{ key: 'box', op: '>=', v: 21 }, { key: 'shotFor', op: '>=', v: 40 }, { key: 'box', op: '>=', v: 30 }],
+    hints: ['Watch your right-back. Does he join in?', 'A wing-back overlaps and makes it two against one.', 'Then give him a target: let the winger take his man on, and send the far winger into the box as an inside forward.'],
+    debrief: 'An overlap turns one against one into two against one, and the shots come. Getting into the box takes more: a winger willing to take his man on, and a runner arriving from the far side to give him someone to find.' },
 ];
 const lessonMetric = (M, key) => M[key];
 const goalMet = (M, g) => (g.op === '>=' ? lessonMetric(M, g.key) >= g.v - 1e-9 : lessonMetric(M, g.key) <= g.v + 1e-9);
@@ -4699,7 +5072,16 @@ function setFormationOf(src, team, f) {
   });
   t.formation = f;
   t.pi = FORMATIONS[f].map(() => 'normal');
-  if (src === club) saveClub();
+  if (src === club) { saveClub(); pruneOrders(team); }
+}
+// Orders name players by their place in the formation: a new formation for
+// us clears them; a new formation or opponent for them clears the ones that
+// name one of their men.
+function pruneOrders(team) {
+  const keep = (o) => team === 'away' && o.kind !== 'press' && o.kind !== 'mark';
+  for (const k in lab.ordersBySit) lab.ordersBySit[k] = lab.ordersBySit[k].filter(keep);
+  lab.orders = lab.orders.filter(keep);
+  saveLab();
 }
 
 /* ================================================================
@@ -4725,7 +5107,8 @@ function boardSetup(transition) {
   for (const p of state.players) pos[p.team][slotOf(p)] = [p.x, p.y];
   const holder = carrier();
   const poss = holder ? holder.team : state.possession;
-  return { pos, ball: { ...state.ball }, poss, holder: holder && holder.team === poss ? slotOf(holder) : null, transition: !!transition };
+  const orders = appMode === 'lab' || appMode === 'lessons' ? lab.orders.map((o) => ({ ...o, team: 'home' })) : [];
+  return { pos, ball: { ...state.ball }, poss, holder: holder && holder.team === poss ? slotOf(holder) : null, transition: !!transition, orders };
 }
 
 /* ================================================================
@@ -4755,6 +5138,8 @@ function clearReplay(restore = true) {
   replay.playing = false;
   if (restore) restoreStart(replay.start);
   replay.w = null; replay.start = null; replay.focus = null; replay.key = [];
+  for (const p of state.players) { p.face = null; p.vx = p.vy = 0; p.mode = null; }
+  state.ballH = 0; camDirty = true;
   $('#timeline').hidden = true;
   $('#stage').classList.remove('with-timeline');
   layout();
@@ -4767,18 +5152,27 @@ function applyFrame(t) {
   state.players.forEach((p) => {
     const j = w.players.findIndex((q) => q.id === p.id);
     if (j < 0) return;
-    p.x = a.p[j][0] + (b.p[j][0] - a.p[j][0]) * k;
-    p.y = a.p[j][1] + (b.p[j][1] - a.p[j][1]) * k;
+    const pa = a.p[j], pb = b.p[j];
+    p.x = pa[0] + (pb[0] - pa[0]) * k;
+    p.y = pa[1] + (pb[1] - pa[1]) * k;
+    // Which way he faces and how fast he is going, for drawing him as a player.
+    if (pa[5] != null) { let da = pb[5] - pa[5]; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; p.face = pa[5] + da * k; }
+    p.vx = (pb[0] - pa[0]) / dt; p.vy = (pb[1] - pa[1]) / dt;
+    if (a === b && i > 0) { const pc = frames[i - 1].p[j]; p.vx = (pa[0] - pc[0]) / dt; p.vy = (pa[1] - pc[1]) / dt; }
+    p.mode = MODE_LIST[pa[2]] || 'shape';
   });
   state.ball.x = a.b[0] + (b.b[0] - a.b[0]) * k;
   state.ball.y = a.b[1] + (b.b[1] - a.b[1]) * k;
   state.ballLift = clamp((a.b[2] + (b.b[2] - a.b[2]) * k) / 6, 0, 1);
   replay.owner = a.b[3] >= 0 ? w.players[a.b[3]].id : null;
+  state.ballH = a.b[2] + (b.b[2] - a.b[2]) * k;
+  state.ballDist = (state.ballDist || 0);
 }
 function replayTick(now) {
   if (!replay.w || !replay.playing) return;
   const w = replay.w;
-  replay.t = Math.min(w.t, replay.t + ((now - replay.last) / 1000) * replay.speed);
+  // rAF's timestamp can be a touch older than the clock read when play started.
+  replay.t = clamp(replay.t + (Math.max(0, now - replay.last) / 1000) * replay.speed, 0, w.t);
   replay.last = now;
   applyFrame(replay.t);
   const due = w.events.filter((e) => e.t <= replay.t + 1e-6).length;
@@ -4851,16 +5245,190 @@ $('#tl-marks').addEventListener('click', (ev) => { const b = ev.target.closest('
 function focusMoment(m) { if (m) seek(Math.max(0, m.t - 0.2), m); }
 
 /* ================================================================
+   Camera: on the coaching screens it frames the action (the ball and the
+   dozen players nearest it), and during a replay it follows the play,
+   looking a little ahead of the ball so a long pass doesn't leave the
+   frame. "Full" shows the whole pitch; the board always does.
+   ================================================================ */
+const CAM_KEY = 'tacticsLab.cam';
+const camPref = { auto: store.get(CAM_KEY, true) !== false };
+let camDirty = true, camSnap = true;
+function actionBox() {
+  const pts = [{ x: state.ball.x, y: state.ball.y }];
+  if (replay.w) {
+    const w = replay.w, i = Math.min(w.frames.length - 1, Math.floor(replay.t / ENG.DT) + 7), b = w.frames[i].b;
+    pts.push({ x: b[0], y: b[1] });
+  }
+  // Following play: the ball and the players nearest it. Setting up: everyone
+  // within reach of the ball, which takes in the line you are attacking or
+  // the men you are about to press.
+  const vis = state.players.filter(visible);
+  const near = replay.w ? vis.sort((a, b) => dist(a, state.ball) - dist(b, state.ball)).slice(0, 10) : vis.filter((p) => dist(p, state.ball) < 38);
+  for (const p of near) if (p.role !== 'GK' || dist(p, state.ball) < 25) pts.push(p);
+  if (!replay.w) for (const o of lab.orders) if (o.to) pts.push(o.to);
+  let x0 = Math.min(...pts.map((p) => p.x)) - 6, x1 = Math.max(...pts.map((p) => p.x)) + 6;
+  let y0 = Math.min(...pts.map((p) => p.y)) - 5, y1 = Math.max(...pts.map((p) => p.y)) + 5;
+  // Never tighter than about a third of the pitch: enough to see the shape around the ball.
+  const minX = 42, minY = 28;
+  if (x1 - x0 < minX) { const c = (x0 + x1) / 2; x0 = c - minX / 2; x1 = c + minX / 2; }
+  if (y1 - y0 < minY) { const c = (y0 + y1) / 2; y0 = c - minY / 2; y1 = c + minY / 2; }
+  return [x0, y0, x1, y1];
+}
+function updateCamGoal() {
+  const coaching = appMode === 'lab' || (appMode === 'lessons' && lesson.id) || appMode === 'match';
+  if (!coaching || !camPref.auto) { frameAll(); return; }
+  if (!replay.w && !camDirty) return;
+  camDirty = false;
+  frameBox(...actionBox());
+}
+
+/* ================================================================
+   The coach's plan: tap one of your players and give him a job in this
+   situation (make a run, play a set pass, carry it somewhere, press or
+   mark a named man, hold his position). The engine carries it out, the
+   replay shows it, and a test says how often it happened and what it did.
+   ================================================================ */
+const ORDER_TEXT = { run: 'Run', pass: 'Pass to', carry: 'Carry', hold: 'Hold position', press: 'Press', mark: 'Mark' };
+function orderLine(o) {
+  const me = `#${FORMATIONS[labTeams().home.tactic.formation][o.slot][4]}`, them = (k) => `#${FORMATIONS[labTeams().away.tactic.formation][k][4]}`, us = (k) => `#${FORMATIONS[labTeams().home.tactic.formation][k][4]}`;
+  switch (o.kind) {
+    case 'run': return `${me} makes a run${o.delay ? ` after ${o.delay} s` : ''}`;
+    case 'pass': return `${me} passes to ${us(o.mate)} when he gets it`;
+    case 'carry': return `${me} carries it forward when he gets it`;
+    case 'hold': return `${me} holds his position`;
+    case 'press': return `${me} presses their ${them(o.vs)} when he has it`;
+    case 'mark': return `${me} man-marks their ${them(o.vs)}`;
+  }
+  return '';
+}
+const coachingBoard = () => appMode === 'lab' || (appMode === 'lessons' && lesson.id);
+function setOrder(o) {
+  lab.orders = lab.orders.filter((q) => q.slot !== o.slot);
+  if (o.kind) lab.orders.push(o);
+  saveLab();
+  // The last test becomes the one to beat, so the next test shows what the order changed.
+  if (lab.result && lab.result.sit === lab.sit) lab.pinned = lab.result;
+  lab.proof = null;
+  renderSide(); requestRender();
+}
+function openOrderMenu(slot) { lab.orderSel = slot; lab.orderPick = null; renderOrderMenu(); requestRender(); }
+function closeOrderMenu() { lab.orderSel = null; lab.orderPick = null; const m = $('#ordermenu'); if (m) m.hidden = true; }
+function renderOrderMenu() {
+  const m = $('#ordermenu');
+  if (lab.orderSel == null || !coachingBoard() || replay.w) { m.hidden = true; return; }
+  const sit = labSit(), slot = lab.orderSel, cur = lab.orders.find((o) => o.slot === slot);
+  const p = state.players.find((q) => q.team === 'home' && slotOf(q) === slot);
+  if (!p) { m.hidden = true; return; }
+  // Choosing a target: get out of the way, leaving a way to cancel.
+  if (lab.orderPick) {
+    setHTML(m, `<span class="t" style="color:var(--select)">${{ run: 'Tap where he should run to', carry: 'Tap where he should carry it', pass: 'Tap the team-mate he passes to', press: 'Tap the opponent he presses', mark: 'Tap the opponent he marks' }[lab.orderPick]}</span><button data-ord="cancel">Cancel</button>`);
+    m.hidden = false; m.style.left = '12px'; m.style.top = '12px';
+    return;
+  }
+  const kinds = sit.has === 'home' ? ['run', 'pass', 'carry', 'hold'] : ['press', 'mark', 'hold'];
+  const btn = (k) => `<button data-ord="${k}" aria-pressed="${cur?.kind === k}">${ORDER_TEXT[k]}${k === 'run' || k === 'carry' ? '…' : k === 'pass' || k === 'press' || k === 'mark' ? '…' : ''}</button>`;
+  const delay = cur?.kind === 'run' ? `<span class="t">Go: ${[0, 1, 2].map((d) => `<button data-ord-delay="${d}" aria-pressed="${(cur.delay || 0) === d}">${d ? `after ${d} s` : 'straight away'}</button>`).join(' ')}</span>` : '';
+  const pick = lab.orderPick ? `<span class="t" style="color:var(--select)">${{ run: 'Now tap where he should run to', carry: 'Now tap where he should carry it', pass: 'Now tap the team-mate he passes to', press: 'Now tap the opponent he presses', mark: 'Now tap the opponent he marks' }[lab.orderPick]}</span>` : '';
+  setHTML(m, `<span class="t">#${p.num} ${esc(p.tag || p.role)}${p.name ? ` · ${esc(p.name)}` : ''}</span>${pick}${kinds.map(btn).join('')}${cur ? '<button data-ord="clear" class="gold">No order</button>' : ''}<button data-ord="close">Done</button>${delay}`);
+  m.hidden = false;
+  // Beside the player, kept on screen.
+  const sp = toScreen(p.x, p.y), stage = $('#stage').getBoundingClientRect(), cv = canvas.getBoundingClientRect();
+  const x = cv.left - stage.left + sp.x, y = cv.top - stage.top + sp.y, mw = m.offsetWidth, mh = m.offsetHeight;
+  // On the side of him away from goal, so it doesn't cover the run he's about to make.
+  const awayFromGoal = toScreen(p.x - 10, p.y).x < sp.x ? -1 : 1;
+  m.style.left = `${clamp(awayFromGoal < 0 ? x - mw - 24 : x + 24, 8, stage.width - mw - 8)}px`;
+  m.style.top = `${clamp(y - mh / 2, 8, stage.height - mh - 8)}px`;
+}
+$('#ordermenu').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  const slot = lab.orderSel, k = b.dataset.ord;
+  if (b.dataset.ordDelay != null) { const o = lab.orders.find((q) => q.slot === slot); if (o) { o.delay = +b.dataset.ordDelay || 0; if (!o.delay) delete o.delay; setOrder(o); } renderOrderMenu(); return; }
+  if (k === 'close') { closeOrderMenu(); requestRender(); return; }
+  if (k === 'cancel') { lab.orderPick = null; $('#ticker').className = ''; renderOrderMenu(); return; }
+  if (k === 'clear') { setOrder({ slot }); renderOrderMenu(); return; }
+  if (k === 'hold') { setOrder({ slot, kind: 'hold' }); renderOrderMenu(); return; }
+  lab.orderPick = k;
+  renderOrderMenu();
+  ticker({ run: 'Tap where he should run to', carry: 'Tap where he should carry it', pass: 'Tap the team-mate he should pass to', press: 'Tap the opponent he should press', mark: 'Tap the opponent he should mark' }[k], 'focus', 0);
+});
+// A tap on the pitch while choosing a target.
+function orderPickAt(pt) {
+  const kind = lab.orderPick, slot = lab.orderSel;
+  if (!kind || slot == null) return false;
+  const hit = hitTest(pt), p = hit && hit.kind === 'player' ? hit.target : null;
+  if (kind === 'run' || kind === 'carry') { const to = cleanPt(pt); setOrder({ slot, kind, to }); }
+  else if (kind === 'pass') { if (!p || p.team !== 'home' || slotOf(p) === slot) { toast('Tap one of his team-mates'); return true; } setOrder({ slot, kind, mate: slotOf(p) }); }
+  else if (kind === 'press' || kind === 'mark') { if (!p || p.team !== 'away') { toast('Tap one of their players'); return true; } setOrder({ slot, kind, vs: slotOf(p) }); }
+  lab.orderPick = null;
+  $('#ticker').className = '';
+  renderOrderMenu();
+  return true;
+}
+// Draw the plan: gold, on the starting picture; faint during a replay.
+function drawOrders() {
+  if (!lab.orders.length || !coachingBoard()) return;
+  const r = playerR(), gold = colors.select, alpha = replay.w ? 0.35 : 0.95;
+  const home = (k) => state.players.find((q) => q.team === 'home' && slotOf(q) === k), away = (k) => state.players.find((q) => q.team === 'away' && slotOf(q) === k);
+  for (const o of lab.orders) {
+    const p = home(o.slot);
+    if (!p) continue;
+    const from = replay.start && replay.w ? { x: replay.start.players[state.players.indexOf(p)][0], y: replay.start.players[state.players.indexOf(p)][1] } : p;
+    if (o.kind === 'run') arrow(from.x, from.y, o.to.x, o.to.y, gold, 0.34, { alpha, label: o.delay ? `+${o.delay}s` : '' });
+    else if (o.kind === 'carry') arrow(from.x, from.y, o.to.x, o.to.y, gold, 0.3, { dash: [0.4, 0.4], alpha, label: 'carry' });
+    else if (o.kind === 'pass') { const m = home(o.mate); if (m) arrow(p.x, p.y, m.x, m.y, gold, 0.24, { dash: [1, 0.6], alpha, label: 'pass' }); }
+    else if (o.kind === 'press' || o.kind === 'mark') {
+      const a = away(o.vs);
+      if (!a) continue;
+      ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = gold; ctx.lineWidth = lineWidthM(0.22);
+      if (o.kind === 'mark') { ctx.setLineDash([0.5, 0.4]); line(p.x, p.y, a.x, a.y); ctx.setLineDash([]); }
+      circle(a.x, a.y, r * 1.7); ctx.restore();
+      if (o.kind === 'press') arrow(p.x, p.y, a.x + (p.x - a.x) * (r * 1.8 / Math.max(dist(p, a), 0.1)), a.y + (p.y - a.y) * (r * 1.8 / Math.max(dist(p, a), 0.1)), gold, 0.3, { alpha, label: 'press' });
+      else { ctx.save(); ctx.globalAlpha = alpha; uprightAt(a.x, a.y, () => { ctx.fillStyle = gold; ctx.font = `700 ${r * 0.9}px ${FONT_COND}`; ctx.textAlign = 'center'; ctx.fillText('marked', 0, -r * 2); }); ctx.restore(); }
+    } else if (o.kind === 'hold') {
+      ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = gold; ctx.lineWidth = lineWidthM(0.24);
+      ctx.strokeRect(p.x - r * 1.6, p.y - r * 1.6, r * 3.2, r * 3.2); ctx.restore();
+    }
+  }
+  // The man you are giving an order to.
+  if (lab.orderSel != null && !replay.w) { const p = home(lab.orderSel); if (p) { ctx.save(); ctx.strokeStyle = gold; ctx.lineWidth = lineWidthM(0.3); ctx.setLineDash([0.6, 0.4]); circle(p.x, p.y, r * 2); ctx.restore(); } }
+}
+function planHTML() {
+  const sit = labSit(), w = replay.w, agg = lab.result && lab.result.sit === lab.sit ? lab.result.agg : null;
+  const rows = lab.orders.map((o, i) => {
+    let res = '';
+    const wo = w && w.orders ? w.orders.find((q) => q.slot === o.slot && q.kind === o.kind) : null;
+    if (wo) { const r = orderResult(wo); res = `<span class="res ${r.ok === true ? 'ok' : r.ok === false ? 'no' : ''}">This run: ${esc(r.text)}</span>`; }
+    else if (agg && agg.orders) {
+      const a = agg.orders.find((q) => q.slot === o.slot && q.kind === o.kind);
+      if (a) { const n = a.n - a.na; res = `<span class="res">Over ${a.n} runs: carried out ${a.ok} of ${n} times it came up${o.kind === 'run' && a.found ? `, got the ball ${a.found} times` : ''}${a.won ? `, won it ${a.won} times` : ''}.</span>`; }
+    }
+    return `<div class="po"><b>${esc(orderLine(o))}</b><button class="link" data-unorder="${o.slot}" aria-label="Remove">✕</button>${res}</div>`;
+  }).join('');
+  const hint = sit.has === 'home' ? 'Tap one of your players to tell him what to do: make a run, play a set pass, carry it, or stay put.' : 'Tap one of your players to tell him what to do: press a named man, mark one, or stay in shape.';
+  return `<section><h2>Your plan</h2>${rows ? `<div class="plan-list">${rows}</div>` : ''}<p class="muted small">${hint}${rows ? ' Watch to see it, test to see how often it comes off and what it changes.' : ''}</p></section>`;
+}
+
+/* ================================================================
    Lab: pick a situation, set both sides, watch one run or test 100.
    ================================================================ */
 const lab = {
   sit: 0, setupT: false, result: null, pinned: null, marks: [], busy: false, progress: 0, insights: [], coachNote: '', coachBusy: false, showSpace: false, showPlan: true,
-  moved: new Set(), saved: null, proof: null,
+  moved: new Set(), saved: null, proof: null, orders: [], orderSel: null, orderPick: null, ordersBySit: {},
   get play() { return replay.w ? replay : null; },
 };
 const LAB_KEY = 'tacticsLab.lab.v2';
-try { const s = store.get(LAB_KEY, null); if (s && SITUATIONS[s.sit]) lab.sit = s.sit; if (s && s.speed) replay.speed = s.speed === 2 ? 2 : 1; } catch { /* start clean */ }
-const saveLab = () => store.set(LAB_KEY, { sit: lab.sit, speed: replay.speed });
+const ORDER_KINDS = ['run', 'pass', 'carry', 'hold', 'press', 'mark'];
+const cleanOrders = (list) => (Array.isArray(list) ? list : []).filter((o) => o && ORDER_KINDS.includes(o.kind) && Number.isInteger(o.slot) && o.slot >= 0 && o.slot < 11)
+  .map((o) => ({ slot: o.slot, kind: o.kind, ...(o.to && isPt(o.to) ? { to: cleanPt(o.to) } : {}), ...(Number.isInteger(o.vs) ? { vs: clamp(o.vs, 0, 10) } : {}), ...(Number.isInteger(o.mate) ? { mate: clamp(o.mate, 0, 10) } : {}), ...(o.delay ? { delay: clamp(+o.delay || 0, 0, 3) } : {}) }))
+  .filter((o) => (o.kind !== 'run' && o.kind !== 'carry') || o.to).filter((o) => (o.kind !== 'press' && o.kind !== 'mark') || o.vs != null).filter((o) => o.kind !== 'pass' || o.mate != null);
+try {
+  const s = store.get(LAB_KEY, null);
+  if (s && SITUATIONS[s.sit]) lab.sit = s.sit;
+  if (s && s.speed) replay.speed = [0.5, 1, 2].includes(s.speed) ? s.speed : 1;
+  if (s && s.orders && typeof s.orders === 'object') for (const k in s.orders) if (SITUATIONS[+k]) lab.ordersBySit[+k] = cleanOrders(s.orders[k]);
+} catch { /* start clean */ }
+const saveLab = () => { if (appMode === 'lab') lab.ordersBySit[lab.sit] = lab.orders; store.set(LAB_KEY, { sit: lab.sit, speed: replay.speed, orders: lab.ordersBySit }); };
 
 // Which squads the lab is using: a lesson's own, or your club's.
 const labSrc = () => (appMode === 'lessons' && lesson.src ? lesson.src : club);
@@ -4869,7 +5437,10 @@ const labTeams = () => withForce(teamsOf(labSrc()), labSit());
 
 function loadSituation(i, keepResults = false) {
   clearReplay(false);
+  if (appMode === 'lab' && lab.sit !== i) lab.ordersBySit[lab.sit] = lab.orders;
   lab.sit = i;
+  lab.orders = appMode === 'lab' ? [...(lab.ordersBySit[i] || [])] : [];
+  closeOrderMenu();
   const teams = labTeams(), sit = labSit();
   const setup = engSetup(teams, sit);
   placeSetup(teams, setup);
@@ -4878,6 +5449,7 @@ function loadSituation(i, keepResults = false) {
   replay.start = null;
   if (!keepResults) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; lab.coachNote = ''; lab.proof = null; }
   lab.marks = keepResults ? lab.marks : [];
+  camDirty = true; camSnap = true;
   saveLab();
   renderSide();
   requestRender();
@@ -4902,6 +5474,7 @@ function refreshSituation(changed = null) {
 
 function labWatch() {
   if (lab.busy || anim) return;
+  closeOrderMenu();
   if (replay.w) clearReplay(true);
   replay.start = saveStart();
   // One run exactly as you placed them (tests vary the picture).
@@ -4924,7 +5497,7 @@ async function labTest() {
     await new Promise((r) => setTimeout(r, 0));
   }
   lab.result = { agg, M: metricsOf(agg), sit: lab.sit, label: `${teamLine(teams.home)} v ${teamLine(teams.away)}`, ms: performance.now() - t0,
-    tactics: JSON.stringify([teams.home.tactic, teams.away.tactic]) };
+    tactics: JSON.stringify([teams.home.tactic, teams.away.tactic, lab.orders]) };
   lab.insights = appMode === 'lessons' ? [] : insights(agg, teams, sit);
   lab.marks = [...agg.shots.map((s) => ({ kind: s.result === 'goal' ? 'goal' : 'shot', team: s.team, x: s.x, y: s.y })),
     ...agg.regains.filter((r) => r.team === 'home').map((r) => ({ kind: 'won', team: 'home', x: r.x, y: r.y }))];
@@ -5054,9 +5627,9 @@ function resultsHTML() {
   const r = lab.result, pin = lab.pinned;
   if (lab.busy) return `<div class="progress" aria-label="Testing"><i style="width:${Math.round(lab.progress * 100)}%"></i></div><p class="muted small">Playing ${TEST_RUNS} runs…</p>`;
   if (!r || r.sit !== lab.sit) return `<p class="muted">Test the situation ${TEST_RUNS} times to see how often it works. Every test uses the same ${TEST_RUNS} runs, so when you change something and test again, the difference is down to your change.</p>`;
-  const stale = r.tactics !== JSON.stringify([labTeams().home.tactic, labTeams().away.tactic]);
+  const stale = r.tactics !== JSON.stringify([labTeams().home.tactic, labTeams().away.tactic, lab.orders]);
   return `<div class="tiles">${tilesHTML(r, pin)}</div>
-    <p class="muted small">${TEST_RUNS} runs · ${esc(r.label)}${pin && pin !== r ? ' · compared with your pinned test' : ''}${stale ? ' · <span class="warn">tactics changed since this test</span>' : ''}</p>
+    <p class="muted small">${TEST_RUNS} runs · ${esc(r.label)}${pin && pin !== r ? ' · compared with your pinned test' : ''}${stale ? ' · <span class="warn">tactics or plan changed since this test</span>' : ''}</p>
     <div class="row"><button class="btn small" id="lab-pin">${pin === r ? 'Pinned' : 'Pin to compare'}</button>${appMode === 'lab' ? `<button class="btn small" id="lab-coach" ${lab.coachBusy ? 'disabled' : ''}>Ask the coach</button>` : ''}</div>
     ${lab.coachNote ? `<div class="callout">${lab.coachNote.split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join('<br>')}</div>` : ''}
     <p class="legend"><span class="lg shot"></span>our shots <span class="lg shotag"></span>theirs <span class="lg won"></span>where we won it back</p>
@@ -5102,9 +5675,10 @@ let guideSeen = !!store.get(GUIDE_KEY, false);
 function guideHTML() {
   if (guideSeen) return '';
   return `<section><div class="card gold guide"><h3>How this works</h3>
-    <ol class="small"><li><b>Pick a moment</b> of a match below. Both teams line up the way their tactics say they would.</li>
-    <li><b>Watch</b> one run, and drag players to change the picture. Plan shows where each role will run and where your press goes.</li>
-    <li><b>Test 100×</b> plays it a hundred times with small differences each time. Then the assistant tests the alternatives for you and only recommends what held up.</li>
+    <ol class="small"><li><b>Pick a moment</b> of a match below. Both teams line up the way their tactics say they would; the camera frames the action (Zoom/Full switches).</li>
+    <li><b>Tap one of your players</b> to give him a job here: a run, a set pass, a carry, pressing or marking a named man. Drag a player to move him.</li>
+    <li><b>Watch</b> one run (½× for slow motion). Players accelerate, turn and react like players; Jobs labels what each one is doing, and your plan shows in gold.</li>
+    <li><b>Test 100×</b> plays it a hundred times with small differences each time, says how often your plan came off, and the assistant tests alternatives and only recommends what held up.</li>
     <li><b>Lessons</b> teach one principle each. <b>Match</b> is a season: scout the next opponent, prepare here, play it.</li></ol>
     <button class="btn small" id="guide-ok">Got it</button></div></section>`;
 }
@@ -5127,6 +5701,7 @@ function renderLabSide() {
         ${instrRowsHTML(src, 'away', sit.levers.away)}</details>
       ${sit.force ? `<p class="muted small">In this situation they sit deep whatever their usual style.</p>` : ''}
     </section>
+    ${planHTML()}
     <section><h2>Results</h2><div id="lab-results">${resultsHTML()}</div></section>
     ${insightsHTML()}
     <section><h2>Key moments</h2>${momentsHTML()}</section>
@@ -5412,7 +5987,7 @@ function recordLeague() {
   saveSeason();
   scout.key = null;
   const nf = nextFixture();
-  if (nf) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); }
+  if (nf) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); }
 }
 // Scouting: the situations this fixture will throw up most, and how your
 // current tactic does in each against them compared with an average side.
@@ -5440,7 +6015,7 @@ async function runScout() {
 }
 function prepareFor(sitIdx) {
   const nf = nextFixture();
-  if (nf && club.oppId !== nf.opp) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); }
+  if (nf && club.oppId !== nf.opp) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); }
   labSitSaved = sitIdx; lab.saved = null;
   setMode('lab');
   toast(`Preparing for ${clubName(nf?.opp || club.oppId)}: ${SITUATIONS[sitIdx].name}`);
@@ -5520,8 +6095,9 @@ function syncBars() {
   $('#toolbar').hidden = appMode !== 'board';
   $('#lab-watch').disabled = lab.busy;
   $('#lab-test').disabled = lab.busy;
-  $('#lab-test').textContent = lab.busy ? `${Math.round(lab.progress * 100)}%` : `Test ${TEST_RUNS}×`;
-  $('#lab-speed').textContent = `${replay.speed}×`;
+  setHTML($('#lab-test'), lab.busy ? `${Math.round(lab.progress * 100)}%` : `Test<span class="bl"> ${TEST_RUNS}×</span>`);
+  $('#lab-speed').textContent = replay.speed === 0.5 ? '½×' : `${replay.speed}×`;
+  for (const id of ['#lab-cam', '#match-cam']) { $(id).setAttribute('aria-pressed', String(camPref.auto)); $(id).textContent = camPref.auto ? 'Zoom' : 'Full'; }
   $('#lab-space').setAttribute('aria-pressed', String(lab.showSpace));
   $('#lab-plan').setAttribute('aria-pressed', String(lab.showPlan));
   for (const b of document.querySelectorAll('[data-phase]')) b.setAttribute('aria-pressed', String(b.dataset.phase === tac.phase));
@@ -5563,10 +6139,11 @@ $('#side').addEventListener('click', (ev) => {
   else if (d.lesson) { openLesson(d.lesson); }
   else if (b.id === 'lesson-back') closeLesson();
   else if (b.id === 'lesson-hint') { lesson.hint++; renderSide(); }
+  else if (d.unorder != null) { setOrder({ slot: +d.unorder }); if (lab.orderSel === +d.unorder) closeOrderMenu(); }
   else if (b.id === 'guide-ok') { guideSeen = true; store.set(GUIDE_KEY, true); renderSide(); }
   else if (b.id === 'match-kick') { kickOff(true); }
   else if (b.id === 'match-friendly') { kickOff(false); }
-  else if (b.id === 'season-new') { season = { ...freshSeason(), year: season.year + 1 }; saveSeason(); const nf = nextFixture(); club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); scout.key = null; renderSide(); }
+  else if (b.id === 'season-new') { season = { ...freshSeason(), year: season.year + 1 }; saveSeason(); const nf = nextFixture(); club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); scout.key = null; renderSide(); }
   else if (d.prepare != null) prepareFor(+d.prepare);
   else if (b.id === 'match-second') { playHalf(2); }
   else if (b.id === 'match-again') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); }
@@ -5576,7 +6153,7 @@ $('#side').addEventListener('change', (ev) => {
   const t = ev.target;
   if (t.id === 'sit-select') loadSituation(+t.value);
   else if (t.id === 'opp-select') {
-    club.oppId = t.value; club.them = opponentTeam(t.value); saveClub();
+    club.oppId = t.value; club.them = opponentTeam(t.value); saveClub(); pruneOrders('away');
     if (appMode === 'tactics') showShape(); else if (appMode === 'lab') refreshSituation('away');
     renderSide();
   } else if (t.dataset.role) {
@@ -5606,7 +6183,8 @@ $('#lab-reset').addEventListener('click', () => {
   if (replay.w) { clearReplay(true); toast(lab.moved.size ? 'Back to your set-up. Reset again for the default positions' : 'Back to the start'); }
   else { loadSituation(lab.sit, true); toast('Default starting positions'); }
 });
-$('#lab-speed').addEventListener('click', () => { replay.speed = replay.speed === 1 ? 2 : 1; saveLab(); syncBars(); });
+$('#lab-speed').addEventListener('click', () => { replay.speed = replay.speed === 1 ? 0.5 : replay.speed === 0.5 ? 2 : 1; saveLab(); syncBars(); });
+for (const id of ['#lab-cam', '#match-cam']) $(id).addEventListener('click', () => { camPref.auto = !camPref.auto; store.set(CAM_KEY, camPref.auto); camDirty = true; syncBars(); requestRender(); });
 $('#lab-space').addEventListener('click', () => { lab.showSpace = !lab.showSpace; syncBars(); requestRender(); });
 $('#lab-plan').addEventListener('click', () => { lab.showPlan = !lab.showPlan; syncBars(); requestRender(); });
 for (const b of document.querySelectorAll('[data-phase]')) b.addEventListener('click', () => { tac.phase = b.dataset.phase; showShape(); renderSide(); syncBars(); });
@@ -5632,6 +6210,7 @@ function drawCoaching() {
     if (tac.phase === 'ip') drawRoleRuns(mine); else drawPressPlan(mine);
     return;
   }
+  drawOrders();
   // Test marks: shots (ours blue, theirs red, goals filled) and where we won it back.
   if (!replay.w && lab.marks.length && lab.result && lab.result.sit === lab.sit && (appMode === 'lab' || (appMode === 'lessons' && lesson.id))) {
     for (const m of lab.marks) {
@@ -5646,8 +6225,8 @@ function drawCoaching() {
   }
   if (!replay.w) return;
   // The ball's recent path.
-  const w = replay.w, i = Math.floor(replay.t / ENG.DT);
-  if (lab.showPlan) drawPlan(w, Math.min(i, w.frames.length - 1));
+  const w = replay.w, i = clamp(Math.floor(replay.t / ENG.DT) || 0, 0, w.frames.length - 1);
+  if (lab.showPlan) drawPlan(w, i);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = lineWidthM(0.18); ctx.setLineDash([0.5, 0.5]);
   ctx.beginPath();
   for (let k = Math.max(0, i - 30); k <= Math.min(i, w.frames.length - 1); k++) { const b = w.frames[k].b; k === Math.max(0, i - 30) ? ctx.moveTo(b[0], b[1]) : ctx.lineTo(b[0], b[1]); }
@@ -5737,6 +6316,7 @@ function drawPressPlan(mine) {
 }
 // In a replay: who is pressing, who is cutting a passing lane, who is running where.
 const PLAN_COLOR = '#ff9f43';
+const JOB_WORD = { press: 'press', cover: 'cuts lane', mark: 'marks', run: 'runs', box: 'attacks box', track: 'tracks', intercept: 'goes for it', receive: '' };
 function drawPlan(w, i) {
   const f = w.frames[i], owner = f.b[3];
   const ball = { x: state.ball.x, y: state.ball.y };
@@ -5749,6 +6329,16 @@ function drawPlan(w, i) {
     else if (mode === 'mark') { ctx.save(); ctx.strokeStyle = PLAN_COLOR; ctx.globalAlpha = 0.8; ctx.lineWidth = lineWidthM(0.2); ctx.setLineDash([0.5, 0.4]); circle(p.x, p.y, playerR() * 1.5); ctx.restore(); }
     else if (mode === 'run' || mode === 'box') arrow(p.x, p.y, tx, ty, colors[q.team + 'Run'], 0.3, { alpha: 0.85 });
     else if (mode === 'track') arrow(p.x, p.y, tx, ty, colors[q.team + 'Run'], 0.2, { dash: [0.6, 0.5], alpha: 0.6 });
+    // His job in a word, when the camera is close enough to read it.
+    const word = JOB_WORD[mode];
+    if (word && cam.z > 1.12) {
+      const r = playerR();
+      uprightAt(p.x, p.y, () => {
+        ctx.font = `700 ${r * 0.8}px ${FONT_COND}`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.lineWidth = r * 0.28; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.strokeText(word, 0, -r * 1.75);
+        ctx.fillStyle = mode === 'run' || mode === 'box' || mode === 'track' ? colors[q.team + 'Run'] : PLAN_COLOR; ctx.fillText(word, 0, -r * 1.75);
+      });
+    }
   });
 }
 function planLegendHTML() {
@@ -5984,6 +6574,7 @@ function setMode(mode, init = false) {
   const prev = init ? null : appMode;
   if (prev === 'match' && (match.phase === 'first' || match.phase === 'second')) skipReveal();
   if (prev === 'board') { boardSnap = snapshot(); store.set(BOARD_KEY, boardSnap); }
+  closeOrderMenu();
   clearReplay(false);
   $('#ticker').className = '';
   // The lab and the lessons each keep their own situation and results.
@@ -5991,6 +6582,7 @@ function setMode(mode, init = false) {
   if ((prev === 'lab' && mode === 'lessons') || (prev === 'lessons' && mode === 'lab')) { lab.result = null; lab.pinned = null; lab.marks = []; lab.insights = []; }
   appMode = mode;
   showOnly = null;
+  camDirty = true; camSnap = true;
   store.set('tacticsLab.mode', mode);
   for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
   state.selected = null;
@@ -6036,6 +6628,9 @@ function requestRender() {
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
+    updateCamGoal();
+    const camMoving = stepCamera(performance.now(), camSnap);
+    camSnap = false;
     const board = appMode === 'board';
     const space = !board && lab.showSpace && (appMode === 'lab' || appMode === 'lessons');
     analyse(board || space);
@@ -6051,6 +6646,8 @@ function requestRender() {
     drawPlayers();
     drawFx();
     if (board) { updateReadout(); syncControls(); syncLayers(); if (!anim && !drag) scheduleSave(); }
+    if (camMoving) requestRender();
+    if (lab.orderSel != null) renderOrderMenu();
   });
 }
 

@@ -461,7 +461,7 @@
 <script>
 'use strict';
 // Which screen is showing, and (on the tactics screen) which one side to draw.
-let appMode = 'lab', showOnly = null;
+let appMode = 'match', showOnly = null;
 
 /* ================================================================
    Pitch geometry (metres)
@@ -2339,6 +2339,61 @@ try { const s = store.get('tacticsLab.scenarios.v1', null); if (s) scenarioSet =
 renderScenarioUI();
 
 /* ENGINE START */
+// Deterministic maths. The engine uses only + − × ÷ and √, which every
+// browser computes to the same bit, so a run (and a lesson's hundred runs)
+// comes out identically everywhere. Built-in Math.sin, Math.exp and the rest
+// may differ in the last bit between browsers, and a simulation magnifies
+// that into different matches.
+const DM_LN2_HI = 0.6931471803691238, DM_LN2_LO = 1.9082149292705877e-10, DM_INV_LN2 = 1.4426950408889634;
+const DM_PIO2_HI = 1.5707963267341256, DM_PIO2_LO = 6.077100506506192e-11, DM_2OPI = 0.6366197723675814, DM_PI = 3.141592653589793, DM_PIO2 = 1.5707963267948966;
+function dscale2(v, k) { while (k > 30) { v *= 1073741824; k -= 30; } while (k < -30) { v /= 1073741824; k += 30; } return k >= 0 ? v * (1 << k) : v / (1 << -k); }
+function dexp(x) {
+  if (x !== x) return NaN;
+  if (x > 709) return Infinity;
+  if (x < -745) return 0;
+  const k = Math.round(x * DM_INV_LN2), r = (x - k * DM_LN2_HI) - k * DM_LN2_LO;
+  let p = 1 / 479001600;
+  for (const c of [1 / 39916800, 1 / 3628800, 1 / 362880, 1 / 40320, 1 / 5040, 1 / 720, 1 / 120, 1 / 24, 1 / 6, 0.5, 1, 1]) p = p * r + c;
+  return dscale2(p, k);
+}
+function dlog(x) {
+  if (!(x > 0)) return x === 0 ? -Infinity : NaN;
+  if (x === Infinity) return Infinity;
+  let m = x, k = 0;
+  while (m > 1.4142135623730951) { m *= 0.5; k++; }
+  while (m < 0.7071067811865476) { m *= 2; k--; }
+  const t = (m - 1) / (m + 1), z = t * t;
+  let p = 1 / 29;
+  for (let n = 27; n >= 1; n -= 2) p = p * z + 1 / n;
+  return k * DM_LN2_HI + (2 * t * p + k * DM_LN2_LO);
+}
+const dpow = (a, b) => (b === 0 ? 1 : a === 0 ? 0 : Number.isInteger(b) && Math.abs(b) <= 8 ? (() => { let r = 1; for (let i = 0; i < Math.abs(b); i++) r *= a; return b < 0 ? 1 / r : r; })() : dexp(b * dlog(a)));
+function dsinr(r) { const z = r * r; let p = 1 / 355687428096000; for (const c of [-1 / 1307674368000, 1 / 6227020800, -1 / 39916800, 1 / 362880, -1 / 5040, 1 / 120, -1 / 6, 1]) p = p * z + c; return r * p; }
+function dcosr(r) { const z = r * r; let p = 1 / 20922789888000; for (const c of [-1 / 87178291200, 1 / 479001600, -1 / 3628800, 1 / 40320, -1 / 720, 1 / 24, -0.5, 1]) p = p * z + c; return p; }
+function dquad(x) { const k = Math.round(x * DM_2OPI); return [((k % 4) + 4) % 4, (x - k * DM_PIO2_HI) - k * DM_PIO2_LO]; }
+function dsin(x) { const [q, r] = dquad(x); return q === 0 ? dsinr(r) : q === 1 ? dcosr(r) : q === 2 ? -dsinr(r) : -dcosr(r); }
+function dcos(x) { const [q, r] = dquad(x); return q === 0 ? dcosr(r) : q === 1 ? -dsinr(r) : q === 2 ? -dcosr(r) : dsinr(r); }
+function datan(x) {
+  if (x !== x) return NaN;
+  const neg = x < 0; let a = neg ? -x : x, off = 0;
+  if (a > 1) { a = 1 / a; off = DM_PIO2; }
+  let base = 0;
+  if (a > 0.41421356237309503) { a = (a - 1) / (a + 1); base = DM_PIO2 / 2; }
+  const z = a * a;
+  let p = 1 / 47;
+  for (let n = 45; n >= 1; n -= 2) p = p * -z + 1 / n;
+  // Horner on −z: p = 1 − z/3 + z²/5 − …, the arctangent series divided by a.
+  let r = base + a * p;
+  if (off) r = off - r;
+  return neg ? -r : r;
+}
+function datan2(y, x) {
+  if (x > 0) return datan(y / x);
+  if (x < 0) return y >= 0 ? datan(y / x) + DM_PI : datan(y / x) - DM_PI;
+  return y > 0 ? DM_PIO2 : y < 0 ? -DM_PIO2 : 0;
+}
+const dacos = (x) => datan2(Math.sqrt(Math.max(0, 1 - x * x)), x);
+
 /* ================================================================
    Match engine
    A continuous simulation of a passage of play between two full teams.
@@ -2393,9 +2448,10 @@ const ENG = {
   RECV_T: 1.6,                                // seconds from receiving to playing it, before skill and tempo
   SWITCH_K: 0.4,                              // how often a long switch of play is even considered
   AIR_DEF_R: 2.4, HEAD_SHOT: 0.05, BOX_FOUL: 0.2, // defenders' reach for a high ball; when a header is worth aiming at goal; fouls in the box
-  CORNER_HEAD: 0.45, CORNER_BLOCK: 0.4,       // crosses headed behind, blocked shots deflected behind
-  CLEAR_TOUCH: 0.5, CROSS_BLOCK: 0.35,        // a wide clearance under pressure kicked into touch; crosses blocked behind
+  CORNER_HEAD: 0.26, CORNER_BLOCK: 0.3,       // crosses headed behind, blocked shots deflected behind
+  CLEAR_TOUCH: 0.5, CROSS_BLOCK: 0.18,        // a wide clearance under pressure kicked into touch; crosses blocked behind
   OFF_NOISE: 2.2,                             // how badly a passer judges the offside line
+  SHORT_D: 22, SHORT_K: 0.0002, SHORT_AIR: 0.0025, // short passing: how much it dislikes longer and lofted passes
 };
 
 // Seeded random numbers so any run can be replayed exactly.
@@ -2403,8 +2459,8 @@ function rngFrom(seed) {
   let a = seed >>> 0;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-const gauss = (rng) => Math.sqrt(-2 * Math.log(rng() + 1e-12)) * Math.cos(2 * Math.PI * rng());
-const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+const gauss = (rng) => Math.sqrt(-2 * dlog(rng() + 1e-12)) * dcos(2 * Math.PI * rng());
+const sigmoid = (z) => 1 / (1 + dexp(-z));
 // Math.hypot is slow in most engines; the simulation calls this millions of times.
 const hyp = (x, y) => Math.sqrt(x * x + y * y);
 
@@ -2603,14 +2659,14 @@ const STYLES = {
   },
   tikitaka: {
     name: 'Tiki-taka', formation: '4-3-3', roles: ['sk', 'ifb', 'bpd', 'bpd', 'fb', 'hb', 'mez', 'ap', 'if', 'f9', 'w'],
-    instr: { passing: 'short', tempo: 'slow', width: 'wide', buildUp: 'short', focus: 'middle', runs: 'few', final: 'workIn', crossing: 'rare', onLoss: 'counterpress', onWin: 'hold', engage: 'high', line: 'high', press: 'more', show: 'outside', trap: 'on' },
+    instr: { passing: 'short', tempo: 'slow', width: 'wide', buildUp: 'short', focus: 'middle', runs: 'some', final: 'workIn', crossing: 'rare', onLoss: 'counterpress', onWin: 'hold', engage: 'high', line: 'high', press: 'more', show: 'outside', trap: 'on' },
     idea: 'Control the game with the ball: short passes, players in every line, patient circulation until a gap opens, and an immediate press when it is lost.',
     strengths: 'Dominates the ball and suffocates teams who cannot press well.',
     risks: 'Can be sterile against a deep block, and a press that is beaten leaves a high line exposed.',
   },
   vertical: {
     name: 'Vertical tiki-taka', formation: '4-2-3-1', roles: ['gk', 'fb', 'bpd', 'cd', 'fb', 'dlp', 'dm', 'if', 'ap', 'iw', 'af'],
-    instr: { passing: 'short', tempo: 'fast', width: 'narrow', buildUp: 'short', focus: 'middle', runs: 'many', final: 'workIn', crossing: 'rare', dribbling: 'more', onLoss: 'counterpress', onWin: 'counter', engage: 'mid', press: 'more' },
+    instr: { passing: 'short', tempo: 'fast', width: 'normal', buildUp: 'short', focus: 'middle', runs: 'many', final: 'mixed', crossing: 'rare', dribbling: 'more', onLoss: 'counterpress', onWin: 'counter', engage: 'mid', press: 'more' },
     idea: 'Short passing, but always forwards: combinations through the middle at speed and runners beyond the striker.',
     strengths: 'Cuts through the centre quickly; hard to press because the ball keeps moving.',
     risks: 'Narrow, so switches to your flanks hurt, and more passes go astray.',
@@ -2638,7 +2694,7 @@ const STYLES = {
   },
   control: {
     name: 'Control possession', formation: '4-2-3-1', roles: ['sk', 'fb', 'bpd', 'cd', 'ifb', 'dlp', 'dm', 'iw', 'ap', 'w', 'dlf'],
-    instr: { passing: 'short', tempo: 'slow', buildUp: 'short', runs: 'few', final: 'workIn', crossing: 'rare', onLoss: 'counterpress', onWin: 'hold' },
+    instr: { passing: 'short', tempo: 'slow', buildUp: 'short', runs: 'some', final: 'mixed', crossing: 'rare', onLoss: 'counterpress', onWin: 'hold' },
     idea: 'Keep the ball, keep your shape, and move the opponent until the chance is a good one.',
     strengths: 'Few counter-attacks against you; the game is played on your terms.',
     risks: 'Patience can become passivity: few shots against a well-organised block.',
@@ -2782,7 +2838,7 @@ function engCreate(input) {
     zone: '', result: '', blocker: null, shooter: null };
   holder.gotAt = 0; holder.mode = 'carry'; holder.nextDecide = 0.45;
   // Everyone starts watching the ball; the man on it faces the way he is playing.
-  for (const p of w.players) p.face = p === holder ? (p.team === 'home' ? 0 : Math.PI) : Math.atan2(w.ball.y - p.y, w.ball.x - p.x);
+  for (const p of w.players) p.face = p === holder ? (p.team === 'home' ? 0 : Math.PI) : datan2(w.ball.y - p.y, w.ball.x - p.x);
   w.byId = Object.fromEntries(w.players.map((p) => [p.id, p]));
   // A test is a hundred versions of the situation, not one frozen picture
   // replayed: each run nudges everyone a little from where they were drawn
@@ -2836,7 +2892,7 @@ const inBox = (team, pt) => depthOf(team, pt.x) > PITCH.L - PITCH.boxD && Math.a
 function threatAt(team, p) {
   const u = depthOf(team, p.x), dg = hyp(PITCH.L - u, p.y - MID);
   const central = 1 - Math.min(1, Math.abs(p.y - MID) / 40) * 0.35;
-  return (ENG.THREAT_BASE + 0.35 * Math.exp(-dg / 12)) * central;
+  return (ENG.THREAT_BASE + 0.35 * dexp(-dg / 12)) * central;
 }
 
 // Offside line for attackers of `team` (in their depth): the second-last
@@ -2996,7 +3052,7 @@ function support(w, team, c, ctx, ins) {
     let best = null, bs = -Infinity;
     for (let k = 0; k < 12; k++) {
       const ang = (k / 12) * 2 * Math.PI, r = k % 2 ? 15 : 10;
-      const cand = { x: clamp(c.x + Math.cos(ang) * r, 2, PITCH.L - 2), y: clamp(c.y + Math.sin(ang) * r, 2, PITCH.W - 2) };
+      const cand = { x: clamp(c.x + dcos(ang) * r, 2, PITCH.L - 2), y: clamp(c.y + dsin(ang) * r, 2, PITCH.W - 2) };
       const cu = depthOf(team, cand.x);
       if (cu > ctx.offU - 0.8 || hyp(cand.x - home.x, cand.y - home.y) > 14) continue;
       if (rest && ctx.ub > 30 && cu > ctx.ub - 2) continue;
@@ -3283,11 +3339,11 @@ function runT(p, x, y, slack = 0) {
   if (s <= 0) return 0;
   const V = p.vmax, tau = (V + 0.3) / p.acc;
   const v0 = clamp((p.vx * dx + p.vy * dy) / D, 0, V * 0.98);
-  const turn = s > 2 ? Math.acos(clamp((dx * Math.cos(p.face) + dy * Math.sin(p.face)) / D, -1, 1)) / (11 - 0.75 * hyp(p.vx, p.vy)) * 0.6 : 0;
+  const turn = s > 2 ? dacos(clamp((dx * dcos(p.face) + dy * dsin(p.face)) / D, -1, 1)) / (11 - 0.75 * hyp(p.vx, p.vy)) * 0.6 : 0;
   // x(t) = V t − (V − v0) τ (1 − e^(−t/τ)); solve for t by Newton's method.
   let t = s / V + (1 - v0 / V) * tau * 0.6;
   for (let i = 0; i < 2; i++) {
-    const e = Math.exp(-t / tau), f = V * t - (V - v0) * tau * (1 - e) - s, df = V - (V - v0) * e;
+    const e = dexp(-t / tau), f = V * t - (V - v0) * tau * (1 - e) - s, df = V - (V - v0) * e;
     t = Math.max(0.01, t - f / df);
   }
   return t + turn;
@@ -3408,10 +3464,10 @@ function airOdds(w, c, to, q, team, cross) {
 function shotModel(w, team, p, header) {
   const gx = team === 'home' ? PITCH.L : 0;
   const v1 = { x: gx - p.x, y: PITCH.goalY0 - p.y }, v2 = { x: gx - p.x, y: PITCH.goalY1 - p.y };
-  const angle = Math.acos(clamp((v1.x * v2.x + v1.y * v2.y) / (hyp(v1.x, v1.y) * hyp(v2.x, v2.y) || 1), -1, 1));
+  const angle = dacos(clamp((v1.x * v2.x + v1.y * v2.y) / (hyp(v1.x, v1.y) * hyp(v2.x, v2.y) || 1), -1, 1));
   const d = hyp(gx - p.x, MID - p.y);
-  const central = 2 * Math.atan((PITCH.goalY1 - PITCH.goalY0) / 2 / Math.max(d, 1));
-  let xg = clamp(0.8 * Math.exp(-d / 7.5) * Math.pow(clamp(angle / central, 0, 1), 0.8), 0, 0.7);
+  const central = 2 * datan((PITCH.goalY1 - PITCH.goalY0) / 2 / Math.max(d, 1));
+  let xg = clamp(0.8 * dexp(-d / 7.5) * dpow(clamp(angle / central, 0, 1), 0.8), 0, 0.7);
   if (header) xg = Math.min(xg * 0.55, 0.4);
   const foes = w.by[oppOf(team)];
   let near = 99;
@@ -3455,14 +3511,14 @@ function options(w, c) {
   const vis = at(c, 'vision') + (R.vision || 0);
   const maxGround = 20 + 1.3 * vis;
   const seesRuns = w.rng() < 0.35 + 0.035 * vis;
-  const lossAt = (pt) => (0.35 * Math.exp(-hyp(depthOf(team, pt.x), pt.y - MID) / 12) + 0.006) * aversion;
+  const lossAt = (pt) => (0.35 * dexp(-hyp(depthOf(team, pt.x), pt.y - MID) / 12) + 0.006) * aversion;
   const here = threatAt(team, c);
   const isGK = c.pos === 'GK';
   const deep = cu < 35 && (isGK || c.pos === 'CB' || c.unit === 'D');
   const opts = [];
   const pref = (d, air, to, gain) => {
     let p = 0;
-    if (ins.passing === 'short') { if (d > 22) p -= 0.0005 * (d - 22); if (air) p -= 0.005; }
+    if (ins.passing === 'short') { if (d > ENG.SHORT_D) p -= ENG.SHORT_K * (d - ENG.SHORT_D); if (air) p -= ENG.SHORT_AIR; }
     else if (ins.passing === 'direct') { if (gain > 12) p += 0.00025 * gain; if (air) p += 0.002; }
     if (deep) {
       if (ins.buildUp === 'short' && air) p -= pressure < 2 ? 0.004 : 0.012;
@@ -3528,7 +3584,7 @@ function options(w, c) {
     const base = team === 'home' ? 0 : Math.PI;
     for (const a of [-70, -35, 0, 35, 70]) {
       const ang = base + (a * Math.PI) / 180;
-      const end = { x: clamp(c.x + Math.cos(ang) * 6, 1, PITCH.L - 1), y: clamp(c.y + Math.sin(ang) * 6, 1, PITCH.W - 1) };
+      const end = { x: clamp(c.x + dcos(ang) * 6, 1, PITCH.L - 1), y: clamp(c.y + dsin(ang) * 6, 1, PITCH.W - 1) };
       // How close can a defender get to each point of the carry by the time he is there?
       let closest = 99;
       const cv = carryOf(c);
@@ -3631,7 +3687,7 @@ function choose(w, c, opts) {
   const top = pool.slice(0, 3);
   const pressed = nearestDist(c, w.by[oppOf(c.team)]) < 2;
   const temp = 0.0015 * (1.4 - 0.04 * at(c, 'composure')) * (pressed ? 1.5 : 1);
-  const best = top[0].u, weights = top.map((o) => Math.exp((o.u - best) / Math.max(temp, 0.0004)));
+  const best = top[0].u, weights = top.map((o) => dexp((o.u - best) / Math.max(temp, 0.0004)));
   let r = w.rng() * weights.reduce((a, b) => a + b, 0);
   for (let i = 0; i < top.length; i++) { r -= weights[i]; if (r <= 0) return top[i]; }
   return top[top.length - 1];
@@ -3678,14 +3734,14 @@ function releaseInfo(w, c) {
 function kickGround(w, c, o) {
   const team = c.team, b = w.ball, pressed = nearestDist(c, w.by[oppOf(team)]) < 2;
   const sd = (0.045 - 0.0018 * passSkill(c)) * ENG.PASS_SD_K * (pressed ? 1.5 - 0.02 * at(c, 'composure') : 1);
-  let ang = Math.atan2(o.to.y - c.y, o.to.x - c.x) + gauss(w.rng) * Math.max(sd, 0.004);
+  let ang = datan2(o.to.y - c.y, o.to.x - c.x) + gauss(w.rng) * Math.max(sd, 0.004);
   let v0 = o.v0 * (1 + gauss(w.rng) * ENG.V0_SD);
   // Now and then a pass is simply misplaced: under-hit, over-hit or off line.
   // Longer passes, worse passers and a man in your face make it likelier.
   const pMis = clamp((0.012 + 0.0022 * o.d) * (1.6 - 0.05 * passSkill(c)) * (pressed ? 1.6 : 1), 0, 0.3) * ENG.MISPLACE;
   if (w.rng() < pMis) { ang += (w.rng() < 0.5 ? -1 : 1) * (0.2 + w.rng() * 0.3); v0 *= 0.75 + w.rng() * 0.6; }
   c.face = ang;
-  Object.assign(b, { state: 'roll', owner: null, x: c.x + Math.cos(ang) * 0.6, y: c.y + Math.sin(ang) * 0.6, h: 0, vx: Math.cos(ang) * v0, vy: Math.sin(ang) * v0, kind: o.type, intended: o.rec,
+  Object.assign(b, { state: 'roll', owner: null, x: c.x + dcos(ang) * 0.6, y: c.y + dsin(ang) * 0.6, h: 0, vx: dcos(ang) * v0, vy: dsin(ang) * v0, kind: o.type, intended: o.rec,
     passer: c, t0: w.t, team, tried: new Set(), odds: o.odds, from: { x: c.x, y: c.y }, aim: o.to, ...releaseInfo(w, c) });
   // No offside from a throw-in, goal kick or corner; the keeper has let go.
   if (w.noOff) b.offIds = new Set();
@@ -3708,7 +3764,7 @@ function kickAir(w, c, o) {
   const sd = o.d * (0.085 - 0.0032 * skill) * (pressed ? 1.3 : 1) * (w.rng() < 0.1 * ENG.MISPLACE ? 3 : 1);
   const land = { x: clamp(o.to.x + gauss(w.rng) * sd, 0.5, PITCH.L - 0.5), y: clamp(o.to.y + gauss(w.rng) * sd, 0.5, PITCH.W - 0.5) };
   const d = hyp(land.x - c.x, land.y - c.y), { T } = airFlight(d);
-  c.face = Math.atan2(land.y - c.y, land.x - c.x);
+  c.face = datan2(land.y - c.y, land.x - c.x);
   Object.assign(b, { state: 'air', owner: null, x: c.x, y: c.y, h: 0, from: { x: c.x, y: c.y }, to: land, t0: w.t, T, H: cross ? 3 + 0.06 * d : 2.5 + 0.13 * d,
     kind: o.type, intended: o.rec, passer: c, team, contested: false, odds: o.odds, zone: o.zone, ...releaseInfo(w, c) });
   if (w.noOff) b.offIds = new Set();
@@ -3804,7 +3860,7 @@ function shoot(w, c, header) {
   else { const s = w.rng() < 0.5 ? -1 : 1; to = { x: gx + (team === 'home' ? 1 : -1), y: MID + s * (4.2 + w.rng() * 4) }; }
   const dist0 = hyp(to.x - c.x, to.y - c.y);
   const b = w.ball;
-  c.face = Math.atan2(to.y - c.y, to.x - c.x);
+  c.face = datan2(to.y - c.y, to.x - c.x);
   // The keeper goes for it: gets there for a save, falls short for a goal.
   if (result === 'saved' || result === 'goal') {
     const reachY = result === 'saved' ? to.y : gk.y + clamp(to.y - gk.y, -2.2, 2.2) * 0.8;
@@ -3855,14 +3911,14 @@ function shotArrives(w) {
   }
   // Blocked: it cannons off the defender.
   if (w.rng() < ENG.CORNER_BLOCK) { S.corners++; return endRun(w, 'corner', team); }
-  const back = Math.atan2(b.from.y - b.to.y, b.from.x - b.to.x);
+  const back = datan2(b.from.y - b.to.y, b.from.x - b.to.x);
   return looseFrom(w, b.blocker, back, 1.2, 4 + w.rng() * 5, opp);
 }
 
 // The ball spills loose from a player in a rough direction.
 function looseFrom(w, p, dir, spread, speed, touchTeam) {
   const a = dir + (w.rng() - 0.5) * 2 * spread, b = w.ball;
-  Object.assign(b, { state: 'roll', owner: null, x: p.x + Math.cos(a) * 0.8, y: p.y + Math.sin(a) * 0.8, h: 0, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+  Object.assign(b, { state: 'roll', owner: null, x: p.x + dcos(a) * 0.8, y: p.y + dsin(a) * 0.8, h: 0, vx: dcos(a) * speed, vy: dsin(a) * speed,
     kind: 'loose', intended: null, passer: p, t0: w.t, team: touchTeam, tried: new Set([p.id]), offIds: null, aim: { x: p.x, y: p.y } });
 }
 
@@ -4037,7 +4093,7 @@ function tackle(w, d, c, takeOn) {
     S.tacklesOk++;
     if (w.rng() < 0.55) { log(w, `${tag(d)} tackles ${tag(c)}`, 'win', opp); return takeBall(w, d, 'tackle'); }
     log(w, `${tag(d)} pokes it away from ${tag(c)}`, 'win', opp);
-    return looseFrom(w, c, Math.atan2(c.y - d.y, c.x - d.x), 1.4, 3 + w.rng() * 4, opp);
+    return looseFrom(w, c, datan2(c.y - d.y, c.x - d.x), 1.4, 3 + w.rng() * 4, opp);
   }
   // In the box defenders know a foul is a penalty, and most challenges are clean.
   const foulP = FOUL_P[ins.tackling] * (1.25 - at(d, 'tackling') / 25) * (inBox(team, c) ? ENG.BOX_FOUL : 1);
@@ -4087,9 +4143,9 @@ function aerialContest(w, cands) {
     }
     if (w.rng() < ctrlProb(p, 9, true, nearestDist(p, w.by[oppOf(p.team)]))) return takeBall(w, p, 'control');
     p.heavy = true;
-    return looseFrom(w, p, Math.atan2(b.to.y - b.from.y, b.to.x - b.from.x), 1.2, 3 + w.rng() * 3, p.team);
+    return looseFrom(w, p, datan2(b.to.y - b.from.y, b.to.x - b.from.x), 1.2, 3 + w.rng() * 3, p.team);
   }
-  const ws = scored.map((q) => Math.exp(q.s / 2.5)), tot = ws.reduce((a, c) => a + c, 0);
+  const ws = scored.map((q) => dexp(q.s / 2.5)), tot = ws.reduce((a, c) => a + c, 0);
   let r = w.rng() * tot;
   for (let i = 0; i < scored.length; i++) { r -= ws[i]; if (r <= 0) { win = scored[i]; break; } }
   win ||= scored.at(-1);
@@ -4109,7 +4165,7 @@ function aerialContest(w, cands) {
     if (sm.xg > ENG.HEAD_SHOT && inBox(kteam, p)) { p.gotAt = w.t; return shoot(w, p, true); }
     log(w, `${tag(p)} wins the header`, 'run', kteam);
     const mate = w.by[kteam].filter((q) => q !== p && q.pos !== 'GK').sort((a, c) => hyp(a.x - p.x, a.y - p.y) - hyp(c.x - p.x, c.y - p.y))[0];
-    const dir = mate ? Math.atan2(mate.y - p.y, mate.x - p.x) : (kteam === 'home' ? 0 : Math.PI);
+    const dir = mate ? datan2(mate.y - p.y, mate.x - p.x) : (kteam === 'home' ? 0 : Math.PI);
     return looseFrom(w, p, dir, 0.5, 5 + w.rng() * 3, kteam);
   }
   // The defending side heads it away, often behind for a corner when it is a cross into the box.
@@ -4283,14 +4339,14 @@ function move(w) {
     // Which way he faces: run the way you're going when it's far or urgent;
     // otherwise keep your eyes on the ball (or the man on it) and shuffle.
     const ball = held && held !== p ? held : b;
-    const mvAng = mv > 0.05 ? Math.atan2(tvy, tvx) : p.face;
+    const mvAng = mv > 0.05 ? datan2(tvy, tvx) : p.face;
     const jockey = (p.mode === 'press' || p.mode === 'contain') && held && held.team !== p.team && hyp(held.x - p.x, held.y - p.y) < 7;
     let want = p.face;
     if (held === p) want = mv > 0.8 ? mvAng : p.face;
     else if (p.mode === 'dive') want = p.face;
-    else if (mv > 0.55 * p.vmax || (mv > 2.2 && d > 6)) want = jockey ? Math.atan2(ball.y - p.y, ball.x - p.x) : mvAng;
+    else if (mv > 0.55 * p.vmax || (mv > 2.2 && d > 6)) want = jockey ? datan2(ball.y - p.y, ball.x - p.x) : mvAng;
     else {
-      const toBall = Math.atan2(ball.y - p.y, ball.x - p.x);
+      const toBall = datan2(ball.y - p.y, ball.x - p.x);
       want = !jockey && mv > 0.4 && Math.abs(angDiff(mvAng, toBall)) < 1.2 ? mvAng : toBall;
     }
     const sp0 = hyp(p.vx, p.vy), turn = (p.mode === 'dive' ? 0 : 11 - 0.75 * sp0) * dt;
@@ -4346,7 +4402,7 @@ function ballTick(w) {
   if (b.state === 'shot') {
     const f = clamp((w.t - b.t0) / b.T, 0, 1);
     b.x = b.from.x + (b.to.x - b.from.x) * f; b.y = b.from.y + (b.to.y - b.from.y) * f;
-    b.h = b.result === 'off' ? Math.sin(Math.PI * f) * 1.2 : 0.4 * Math.sin(Math.PI * f);
+    b.h = b.result === 'off' ? dsin(Math.PI * f) * 1.2 : 0.4 * dsin(Math.PI * f);
     if (f >= 1) shotArrives(w);
     return;
   }
@@ -4397,7 +4453,7 @@ function ballTick(w) {
       if (w.rng() < ctrlProb(p, speed, false, pressure)) return takeBall(w, p, 'control');
       p.heavy = true;
       log(w, `${tag(p)} miscontrols`, 'bad', p.team);
-      return looseFrom(w, p, Math.atan2(b.vy, b.vx), 1.1, speed * 0.35 + 1, p.team);
+      return looseFrom(w, p, datan2(b.vy, b.vx), 1.1, speed * 0.35 + 1, p.team);
     }
     // An opponent gets a foot to it: clean interception, or a deflection.
     if (p.pos === 'GK' && inBox(oppOf(p.team), p)) return takeBall(w, p, 'claim');
@@ -4406,7 +4462,7 @@ function ballTick(w) {
     else if (w.rng() < clean) return takeBall(w, p, 'intercept');
     if (w.passLog?.length && w.passLog.at(-1).ok === null && b.kind !== 'loose') w.passLog.at(-1).ok = false;
     log(w, `${tag(p)} gets a touch on it`, 'win', p.team);
-    return looseFrom(w, p, Math.atan2(b.vy, b.vx) + (w.rng() - 0.5) * 2, 0.6, speed * 0.4 + 1, p.team);
+    return looseFrom(w, p, datan2(b.vy, b.vx) + (w.rng() - 0.5) * 2, 0.6, speed * 0.4 + 1, p.team);
   }
   if (hyp(b.vx, b.vy) < 0.05) { b.vx = 0; b.vy = 0; if (b.kind !== 'loose') { b.kind = 'loose'; b.tried = new Set(); } }
 }
@@ -4432,7 +4488,7 @@ function dribbleTick(w) {
   } else {
     // At his feet.
     b.rel = (b.rel || 0.5) + (0.45 - (b.rel || 0.5)) * 0.5; b.rv = 0;
-    const k = 0.4; b.ux = (b.ux ?? 1) * (1 - k) + Math.cos(c.face) * k; b.uy = (b.uy ?? 0) * (1 - k) + Math.sin(c.face) * k;
+    const k = 0.4; b.ux = (b.ux ?? 1) * (1 - k) + dcos(c.face) * k; b.uy = (b.uy ?? 0) * (1 - k) + dsin(c.face) * k;
     const n = hyp(b.ux, b.uy) || 1; b.ux /= n; b.uy /= n;
   }
   b.x = c.x + b.ux * b.rel; b.y = c.y + b.uy * b.rel;
@@ -4696,7 +4752,7 @@ function takeRestart(m) {
   const ts = takerSpot(d);
   tk.x = ts.x; tk.y = ts.y; tk.vx = tk.vy = 0;
   const rx = d.spot.x - tk.x, ry = d.spot.y - tk.y, rl = hyp(rx, ry) || 1;
-  tk.face = Math.atan2(ry, rx);
+  tk.face = datan2(ry, rx);
   Object.assign(b, { state: 'held', owner: tk, team: A, x: d.spot.x, y: d.spot.y, h: 0, vx: 0, vy: 0, rel: clamp(rl, 0.4, 0.8), rv: 0, ux: rx / rl, uy: ry / rl });
   tk.gotAt = w.t; tk.mode = 'carry'; tk.nextDecide = w.t + 0.25; tk.touchOut = false;
   w.poss = A; w.T[A].possStart = w.t;
@@ -4715,7 +4771,7 @@ function shootPenalty(w, c) {
   const to = result === 'off' ? { x: gx + inward * 1, y: MID + side * (3.9 + w.rng() * 1.2) }
     : result === 'goal' ? { x: gx + inward * 0.8, y: MID + side * (1.6 + w.rng() * 1.6) } : { x: gx - inward * 0.4, y: MID + side * (1 + w.rng() * 1.6) };
   gk.target = { x: gk.x, y: result === 'saved' ? to.y : MID - side * 2.2 }; gk.mode = 'dive'; gk.spd = 7; gk.until = w.t + 1;
-  c.face = Math.atan2(to.y - c.y, to.x - c.x);
+  c.face = datan2(to.y - c.y, to.x - c.x);
   Object.assign(b, { state: 'shot', owner: null, from: { x: b.x, y: b.y }, to, t0: w.t, T: Math.max(0.3, hyp(to.x - b.x, to.y - b.y) / 24), result, blocker: null, shooter: c, team, h: 0 });
   w.shots.push({ team, t: w.t, x: b.x, y: b.y, xg: 0.76, header: false, result, id: c.id, cause: 'penalty', counter: false, pen: true });
   log(w, `${tag(c)} takes the penalty`, 'shot', team);
@@ -5330,57 +5386,56 @@ function insights(agg, teams, sit, unit = 'runs') {
 // Goals and hints come from searching each lesson's levers over 200 varied runs:
 // the start fails, the principle the lesson teaches earns the pass, and the
 // third star needs it combined with a second idea.
-const GOALS_BEAT_PRESS = [{ key: 'half', op: '>=', v: 59 }, { key: 'lostOwnThird', op: '<=', v: 8 }, { key: 'half', op: '>=', v: 66 }];
 const LESSONS = [
   { id: 'press-unit', title: 'Press as a unit', sit: 'press', opp: 'castello', style: 'balanced', set: { engage: 'mid', line: 'standard', press: 'normal' },
     levers: ['engage', 'line', 'press', 'pressTo', 'marking'],
-    idea: 'Where your press starts decides what it can win. Wait on halfway and a patient side walks the ball out of its own third; step up and their centre-backs and keeper have to play under pressure, where one bad touch is a chance. But the forwards can’t go alone: if the defence stays back, the gap behind the press is where they play.',
+    idea: 'Where your press starts decides what it can win. Wait on halfway and a patient side walks the ball out of its own third; step up and their centre-backs and keeper have to play under pressure, where one bad touch is a chance. A press works best with a direction: show them towards one touchline and the line becomes an extra defender.',
     task: 'Castello play out from the back. Win the ball back in their half.',
-    goals: [{ key: 'winHigh', op: '>=', v: 16 }, { key: 'shotFor', op: '>=', v: 11 }, { key: 'shotAg', op: '<=', v: 4 }],
-    hints: ['Where does your press start? Look at the line of engagement.', 'Pressing high with the defence back where it was leaves a gap behind the press. Push the line up with it.', 'Watch a run: when they do get through your press, how much room is there behind it?'],
-    debrief: 'The line of engagement wins the ball: pressing from their third turns their build-up into your best chance to score. The defensive line keeps it safe: step it up with the press and the pass that beats your forwards lands among your defenders, not in space.' },
+    goals: [{ key: 'winHigh', op: '>=', v: 25 }, { key: 'shotFor', op: '>=', v: 9 }, { key: 'winHigh', op: '>=', v: 32 }],
+    hints: ['Where does your press start? Look at the line of engagement.', 'Pressing from the front puts their centre-backs under pressure. Now give the press a direction: which way do you want to force them?', 'Press them towards a touchline (Press towards: their left or right): the pass back inside is cut off and the line does the rest.'],
+    debrief: 'The line of engagement decides where you can win it: pressing from their third turns their build-up into your best chance to score. Giving the press a direction turns it into a trap: forced towards a touchline, they lose half their options, the next pass is predictable, and your nearest men can jump it.' },
   { id: 'beat-press', title: 'Beat the press', sit: 'buildup', opp: 'hartwell', style: 'balanced', set: { buildUp: 'short', width: 'narrow', passing: 'short' },
     levers: ['passing', 'width', 'buildUp', 'tempo', 'focus'], roleLevers: ['GK', 'DM'],
     idea: 'Short passes between players standing close together is exactly what a pressing side wants: every pass goes to someone they can reach. To beat the press you make the pitch big, and you are willing to play past the first line, not just around it.',
     task: 'Hartwell press everything. Get the ball into their half without losing it in your own third.',
-    goals: GOALS_BEAT_PRESS,
-    hints: ['Watch where you lose it. Who is the pass to, and how many of them are near him?', 'Mix longer passes into your play, so they can’t squeeze every short option.', 'Spread out: width puts more ground between their pressers, and each one has further to run.'],
-    debrief: 'Against a press, distances decide everything. Spread wide and each presser has more ground to cover; mix in longer passes and they can’t squeeze you without leaving space behind. Either helps; together they take you through.' },
+    goals: [{ key: 'half', op: '>=', v: 35 }, { key: 'lostOwnThird', op: '<=', v: 9 }, { key: 'half', op: '>=', v: 44 }],
+    hints: ['Are you playing around their press, or past it? Look at your passing.', 'Going longer from a narrow shape still gives it away in your own third. Spread out, so the pass has somewhere to land.', 'Give one man the job of finding that pass: make your holding midfielder a deep-lying playmaker.'],
+    debrief: 'Short passes between men standing close together play into a press. Passing past the first line gets you out; spreading wide gives the pass room to land and stops them winning it in your third; and a deep-lying playmaker gives the ball to the man best placed to find it.' },
   { id: 'rest-defence', title: 'Rest defence', sit: 'rest', opp: 'solano', style: 'gegenpress', set: { onLoss: 'mixed' },
     levers: ['onLoss', 'line', 'engage'], roleLevers: ['FB', 'WB', 'DM'],
     idea: 'When you attack, the players you leave behind the ball decide what happens when you lose it. Wing-backs bombing on and a sitting anchor leave a pacy front three running at two centre-backs.',
     task: 'You lose the ball on halfway with your wing-backs high. Solano break at pace. Stop them reaching your box.',
-    goals: [{ key: 'boxAg', op: '<=', v: 27 }, { key: 'shotAg', op: '<=', v: 25 }, { key: 'quickWin', op: '>=', v: 50 }],
-    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'Counter-pressing with everyone sounds brave. Test it: without a man screening, the first pass beats it.'],
-    debrief: 'The best rest defence stops the counter before it starts: a ball-winning midfielder steps into the first pass. Throwing everyone at the ball made it worse here, because one pass past the swarm and Solano were running at your back line.' },
+    goals: [{ key: 'shotAg', op: '<=', v: 5 }, { key: 'quickWin', op: '>=', v: 60 }, { key: 'quickWin', op: '>=', v: 70 }],
+    hints: ['What does your holding midfielder do the moment you lose it?', 'A ball-winning midfielder attacks the ball straight away and stops the counter at source.', 'Now look at who is left behind him. A full-back who picks his moments, instead of a wing-back who always goes, gives your centre-backs company.'],
+    debrief: 'The best rest defence stops the counter before it starts: a ball-winning midfielder steps into the first pass. Behind him, a full-back who was not already fifty metres upfield means the second ball lands with you rather than with their front three.' },
   { id: 'low-block', title: 'Break down a low block', sit: 'lowblock', opp: 'staldric', style: 'balanced', set: { tempo: 'slow', focus: 'middle' }, roles: { 8: 'iw', 10: 'iw' },
     levers: ['tempo', 'focus', 'width', 'runs', 'crossing', 'final'], roleLevers: ['W', 'CM'],
     idea: 'A deep, narrow block is happy to let you pass in front of it. Inverted wingers coming short and slow passing through the middle give it nothing to worry about. What hurts a block is players running beyond it.',
     task: 'St Aldric’s sit in a narrow five at the back. Get into their box.',
-    goals: [{ key: 'box', op: '>=', v: 30 }, { key: 'shotFor', op: '>=', v: 44 }, { key: 'box', op: '>=', v: 35 }],
-    hints: ['Watch your wingers. Do they ever run beyond the back five?', 'An inside forward attacks the box from the flank instead of coming short.', 'A midfielder arriving late in the half-space is the man nobody picks up: try a mezzala.'],
-    debrief: 'Against a low block the ball in front of it is safe for them; runs beyond it are not. An inside forward attacking the box from wide and a mezzala arriving in the channel give their back five runners to track, and that is when the gaps open.' },
+    goals: [{ key: 'box', op: '>=', v: 12 }, { key: 'shotFor', op: '>=', v: 12 }, { key: 'box', op: '>=', v: 19 }],
+    hints: ['Watch your wingers. Do they ever run beyond the back five?', 'An inside forward attacks the box from the flank instead of coming short.', 'One runner is easy for a back five to track. Give them two: make the other winger an inside forward as well.'],
+    debrief: 'Against a low block the ball in front of it is safe for them; runs beyond it are not. An inside forward attacking the box from each flank gives their back five two runners to track at once, and that is when the gaps open.' },
   { id: 'counter', title: 'Counter at speed', sit: 'counter', opp: 'castello', style: 'balanced', set: { onWin: 'hold', tempo: 'slow', passing: 'short' },
     levers: ['onWin', 'tempo', 'passing', 'runs', 'dribbling'], roleLevers: ['ST', 'W'],
     idea: 'The seconds after winning the ball are when the opponent is least organised. Short, slow passing gives them the time to get back; forward passes played quickly don’t.',
     task: 'You win it on halfway while Castello are attacking. Get a shot away.',
-    goals: [{ key: 'shotFor', op: '>=', v: 20 }, { key: 'box', op: '>=', v: 9 }, { key: 'shotFor', op: '>=', v: 30 }],
-    hints: ['Watch the first pass after you win it. Which way does it go?', 'Short passes keep the ball but let them recover. Go more direct.', 'Direct is half of it. Tell them to break the moment you win it, or play quicker.'],
-    debrief: 'A counter lives on its first passes: direct and forward, into runners while their shape is broken, and straight away. Direct passing alone more than triples your shots; with the whole side breaking on the turnover it goes further, because the ball arrives before their defence does.' },
+    goals: [{ key: 'shotFor', op: '>=', v: 7 }, { key: 'box', op: '>=', v: 5 }, { key: 'shotFor', op: '>=', v: 13 }],
+    hints: ['Watch the first pass after you win it. Which way does it go?', 'Short passes keep the ball but let them recover. Go more direct.', 'A direct ball needs someone to aim at: more runs in behind, or a winger who attacks the box as an inside forward.'],
+    debrief: 'A counter lives on its first passes: direct and forward, into runners while their shape is broken. Direct passing alone takes you from almost no shots to several; give it runners to find, in behind or arriving from the flank, and the ball gets there before their defence does.' },
   { id: 'edge', title: 'Defend the edge of the box', sit: 'edge', opp: 'rheinfeld', style: 'balanced', set: { press: 'less', marking: 'zonal', compact: 'wide' },
     levers: ['press', 'tackling', 'marking', 'compact', 'line'],
-    idea: 'Near your own box, time on the ball is a chance. Someone must step out to the ball straight away, and the others must be close enough to help.',
+    idea: 'Near your own box, time on the ball is a chance. The players around the ball must be close enough to help each other, and one of them must step out to the man on it.',
     task: 'Rheinfeld have it 27 m out with runners around your box. Stop the shot.',
-    goals: [{ key: 'shotAg', op: '<=', v: 46 }, { key: 'xgAg', op: '<=', v: 0.045 }, { key: 'shotAg', op: '<=', v: 38 }],
-    hints: ['Who is closing the ball down, and how fast?', 'More pressing intensity sends two players to the ball near your box.', 'With the ball pressed, a narrower block behind takes away the pass that beats the pressure.'],
-    debrief: 'Pressure on the ball is the first defence near your box: the man on it has no time to pick a shot or a pass. A narrow block behind the pressure then takes away the pass into the box, so pressing and compactness work as a pair.' },
+    goals: [{ key: 'shotAg', op: '<=', v: 56 }, { key: 'xgAg', op: '<=', v: 0.025 }, { key: 'xgAg', op: '<=', v: 0.021 }],
+    hints: ['How close together is your block? Look at the gaps between your players near the ball.', 'A narrower block puts two men near the ball and takes away the pass into the box.', 'Now someone has to step out to the ball: raise your pressing intensity so the man on it has no time to shoot.'],
+    debrief: 'Near your box the gaps decide it: a narrow block means the man on the ball always has a second defender close by. Then someone has to step out: more pressing intensity takes away his time, and the shots that are left are hopeful ones from far out.' },
   { id: 'overload', title: 'Overload the flank', sit: 'overload', opp: 'kingsbridge', style: 'balanced', set: { dribbling: 'less', crossing: 'often' }, roles: { 1: 'dfb', 4: 'dfb' },
     levers: ['dribbling', 'crossing', 'width', 'runs', 'final'], roleLevers: ['FB', 'W'],
     idea: 'A winger alone against a full-back, with help coming, is not an attack. Two against one is: a full-back overlapping means the defender has to choose, and the winger can go the other way.',
     task: 'Your winger has it on the right, level with their box. Get into the box.',
-    goals: [{ key: 'box', op: '>=', v: 21 }, { key: 'shotFor', op: '>=', v: 40 }, { key: 'box', op: '>=', v: 30 }],
-    hints: ['Watch your right-back. Does he join in?', 'A wing-back overlaps and makes it two against one.', 'Then give him a target: let the winger take his man on, and send the far winger into the box as an inside forward.'],
-    debrief: 'An overlap turns one against one into two against one, and the shots come. Getting into the box takes more: a winger willing to take his man on, and a runner arriving from the far side to give him someone to find.' },
+    goals: [{ key: 'box', op: '>=', v: 12 }, { key: 'shotFor', op: '>=', v: 15 }, { key: 'box', op: '>=', v: 17 }],
+    hints: ['Watch your right-back. Does he join in?', 'A wing-back overlaps and makes it two against one.', 'When the overlap drags their full-back away, let the winger take his man on: more dribbling.'],
+    debrief: 'An overlap turns one against one into two against one, and the shots come. Getting into the box takes the next step: once the defender has to watch the overlap, the winger taking him on is the way in.' },
 ];
 const lessonMetric = (M, key) => M[key];
 const goalMet = (M, g) => (g.op === '>=' ? lessonMetric(M, g.key) >= g.v - 1e-9 : lessonMetric(M, g.key) <= g.v + 1e-9);
@@ -7046,11 +7101,11 @@ function syncBars() {
   $('#lab-plan').setAttribute('aria-pressed', String(lab.showPlan));
   for (const b of document.querySelectorAll('[data-phase]')) b.setAttribute('aria-pressed', String(b.dataset.phase === tac.phase));
   const go = $('#match-go'), on = liveOn() && live.phase !== 'pre', playing = on && live.phase === 'play';
-  go.textContent = !on ? (nextFixture() ? 'Kick off' : 'Friendly') : live.watching ? 'Back to the match' : playing ? (live.paused ? '▶ Play' : '❚❚ Pause')
-    : live.phase === 'ht' ? 'Second half' : live.others ? 'Other results…' : 'Done';
+  setHTML(go, !on ? (nextFixture() ? 'Kick off' : 'Friendly') : live.watching ? '<span class="bl">Back to the match</span><span class="bs">Back</span>' : playing ? (live.paused ? '▶ Play' : '❚❚ Pause')
+    : live.phase === 'ht' ? 'Second half' : live.others ? 'Other results…' : 'Done');
   go.disabled = !!(on && live.phase === 'ft' && live.others);
   $('#match-speed').hidden = !playing;
-  $('#match-speed').textContent = live.speed === 'hl' ? 'Highlights' : `${live.speed}×`;
+  setHTML($('#match-speed'), live.speed === 'hl' ? '<span class="bl">Highlights</span><span class="bs">Clips</span>' : `${live.speed}×`);
   $('#match-skip').hidden = !playing;
   setHTML($('#match-skip'), `Skip<span class="bl"> to ${live.m?.half === 2 ? 'full time' : 'half-time'}</span>`);
   $('#match-lines').hidden = !on;
@@ -7511,7 +7566,8 @@ renderSaved();
 // pitch; otherwise it is a bottom sheet toggled from the top bar.
 const MODES = ['tactics', 'lab', 'lessons', 'match', 'board'];
 const isNarrow = () => !matchMedia('(min-width: 900px) and (orientation: landscape)').matches;
-let panelOpen = !isNarrow();
+// The panel starts open: on portrait screens it sits under the pitch rather than over it.
+let panelOpen = true;
 function syncPanel() {
   $('#panel').hidden = !(appMode === 'board' && panelOpen);
   $('#side').hidden = !(appMode !== 'board' && panelOpen);
@@ -7612,8 +7668,8 @@ document.fonts?.ready.then(() => { renderBackground(); requestRender(); });
 if (!restore(store.get(BOARD_KEY, null))) setupMatch('4-3-3', '4-4-2');
 boardSnap = snapshot();
 syncControls();
-const firstMode = store.get('tacticsLab.mode', 'lab');
-setMode(MODES.includes(firstMode) ? firstMode : 'lab', true);
+const firstMode = store.get('tacticsLab.mode', 'match');
+setMode(MODES.includes(firstMode) ? firstMode : 'match', true);
 
 new ResizeObserver(() => { layout(); requestRender(); }).observe(canvas);
 // A devicePixelRatio change (moving between screens) doesn't always resize the element,

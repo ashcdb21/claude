@@ -295,15 +295,40 @@
   table.mstats td { padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
   table.mstats td:first-child, table.mstats td:last-child { width: 3.5em; font-weight: 700; }
   table.mstats td:last-child { text-align: right; } table.mstats td:nth-child(2) { text-align: center; color: var(--muted); }
+  .mstrip { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; font-variant-numeric: tabular-nums; }
+  .tabs.inline button { font-size: 13px; letter-spacing: .04em; padding: 8px 1px 9px; }
+  .momentum { width: 100%; height: auto; display: block; background: var(--night); border-radius: 8px; }
+  .legend { font-size: 12px; color: var(--muted); }
+  ol.commentary { max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+  ol.commentary li.tactic { color: var(--armband); } ol.commentary li.whistle { color: var(--muted); font-style: italic; }
+  .sc-list { display: grid; gap: 6px; }
+  .sc-row { display: grid; grid-template-columns: 1.4em 1fr auto; gap: 8px; align-items: start; background: var(--night); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  .sc-row .mk { font-weight: 800; } .sc-row.ok .mk { color: var(--good); } .sc-row.no .mk { color: var(--bad); }
+  .sc-row .v { font: 800 16px var(--display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .feed .it .row { flex-wrap: nowrap; gap: 4px; }
+  .fixture { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; background: var(--night); border-radius: var(--r); padding: 14px 12px; }
+  .fixture .tm { font: 800 19px/1.1 var(--display); letter-spacing: .04em; text-transform: uppercase; } .fixture .tm.r { text-align: right; }
+  .fixture .v { color: var(--muted); font: 800 16px var(--display); }
+  .avgview { display: grid; gap: 6px; }
+  #tac-phase { border: 0; background: transparent; gap: 2px; }
+  .bar #tac-phase button { border: 0; padding: 10px 12px; font-size: 15px; border-radius: 10px; color: var(--muted); box-shadow: none; }
+  .bar #tac-phase button[aria-pressed="true"] { background: var(--surface-2); color: var(--armband); }
+  @media (max-width: 480px) { .bar #tac-phase button { font-size: 13px; padding: 9px 6px; letter-spacing: .02em; } }
 
-  /* Narrow screens: the drawers become bottom sheets over the pitch. */
-  @media (max-width: 899px), (orientation: portrait) {
-    #panel, #side { position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-height: 72%; border-left: 0; border-top: 1px solid var(--line-soft);
+  /* Portrait screens: the drawer sits under the pitch, which shrinks to make
+     room (and turns sideways when that leaves it wider than tall), so nothing
+     on the pitch is hidden behind it. Narrow landscape: a slimmer drawer. */
+  @media (orientation: portrait) {
+    #main { flex-direction: column; }
+    #stage { flex: 1 1 0; min-height: 180px; }
+    #panel, #side { position: relative; width: auto; height: 50%; border-left: 0; border-top: 1px solid var(--line-soft);
       border-radius: 16px 16px 0 0; box-shadow: 0 -12px 40px rgba(0,0,0,.5); }
-    #side { max-height: 62%; }
+    #main:has(#side:not([hidden])) #scorebug { display: none; }
     #stage.in-match #ticker { top: 58px; }
+    #main:has(#side:not([hidden])) #stage.in-match #ticker { top: 10px; }
     .tile .v { font-size: 26px; }
   }
+  @media (max-width: 899px) and (orientation: landscape) { :root { --drawer-w: 300px; } #stage.in-match #ticker { top: 58px; } }
   @media (prefers-reduced-motion: reduce) { #flash, #ticker { animation: none !important; transition: none !important; } }
 </style>
 
@@ -311,10 +336,10 @@
   <header id="topbar">
     <div class="wordmark">Tactics <span>Lab</span></div>
     <nav class="modes" aria-label="Mode">
-      <button data-mode="tactics" aria-pressed="false">Tactics</button>
-      <button data-mode="lab" aria-pressed="true">Lab</button>
-      <button data-mode="lessons" aria-pressed="false">Lessons</button>
       <button data-mode="match" aria-pressed="false">Match</button>
+      <button data-mode="tactics" aria-pressed="false">Team</button>
+      <button data-mode="lab" aria-pressed="true">Training</button>
+      <button data-mode="lessons" aria-pressed="false">Lessons</button>
       <button data-mode="board" aria-pressed="false">Board</button>
     </nav>
     <button class="iconbtn" id="panel-open" aria-expanded="false">Panel</button>
@@ -342,11 +367,13 @@
         <button class="ghost" id="lab-cam" aria-pressed="true" title="Camera: follow the action, or show the whole pitch">Zoom</button>
       </nav>
       <nav id="tacbar" class="bar" hidden aria-label="Tactics view">
-        <span class="seg" id="tac-phase"><button data-phase="ip" aria-pressed="true">With the ball</button><button data-phase="oop" aria-pressed="false">Without it</button></span>
+        <span class="seg" id="tac-phase"><button data-phase="build" aria-pressed="true">Build-up</button><button data-phase="attack" aria-pressed="false">Attack</button><button data-phase="press" aria-pressed="false">Press</button><button data-phase="block" aria-pressed="false">Mid-block</button><button data-phase="low" aria-pressed="false">Low block</button></span>
       </nav>
       <nav id="matchbar" class="bar" hidden aria-label="Match controls">
         <button class="go" id="match-go">Kick off</button>
-        <button class="ghost" id="match-skip" hidden>Skip</button>
+        <button class="ghost" id="match-speed" hidden title="Match speed: 1× to 8×, or highlights only">2×</button>
+        <button class="ghost" id="match-skip" hidden title="Play the rest of this half at once">Skip</button>
+        <button class="ghost" id="match-lines" aria-pressed="true" hidden title="Show your team's lines: back line, length and where the press starts">Lines</button>
         <button class="ghost" id="match-cam" aria-pressed="true" title="Camera: follow the action, or show the whole pitch">Zoom</button>
       </nav>
       <nav id="toolbar" class="bar" role="toolbar" aria-label="Board tools" hidden>
@@ -1366,7 +1393,7 @@ function badge(x, y, text) {
    touchable on a phone, where 1 m can be ~5 px.
    ================================================================ */
 // Drawn at about a footballer's size when zoomed in, never so small he can't be read.
-const playerR = () => Math.max(7 / view.s, Math.max(0.85, Math.min(PLAYER_R, 13 / view.s)));
+const playerR = () => Math.max(8.5 / view.s, Math.max(0.85, Math.min(PLAYER_R, 13 / view.s)));
 const FONT_COND = "'Barlow Condensed', 'Roboto Condensed', 'Arial Narrow', sans-serif";
 
 // Lighten (amt > 0) or darken (amt < 0) a #rrggbb colour.
@@ -1492,7 +1519,7 @@ function drawPlayers() {
   }
   // Ball on top of everything. In the air it rises off its shadow (drawn on
   // the grass where it is) and looks a little bigger, nearer the camera.
-  const h = lab.play ? state.ballH || 0 : (state.ballLift || 0) * 6;
+  const h = lab.play || liveBoard() ? state.ballH || 0 : (state.ballLift || 0) * 6;
   const br = ballR() * (1 + Math.min(0.6, h * 0.06));
   const up = screenOffset(0, -1), lift = h * 0.5;
   ctx.fillStyle = `rgba(0,0,0,${h > 0.3 ? 0.3 : 0.4})`;
@@ -1984,8 +2011,30 @@ function proxyReady() {
   return proxyStatus;
 }
 
+// On claude.ai the page asks Claude through the artifact's own `sample`
+// capability (no key anywhere near the page); run locally, it goes through
+// the bundled server, which keeps the API key on the server.
+let samplePromise;
+function artifactSample() {
+  samplePromise ||= window.claude?.use ? Promise.resolve(window.claude.use('sample')).catch(() => null) : Promise.resolve(null);
+  return samplePromise;
+}
 async function askClaude(prompt, { json = false, onText, signal, system, maxTokens } = {}) {
   let text = '';
+  const sample = await artifactSample();
+  if (sample) {
+    try {
+      const r = await sample(system ? `${system}\n\n${prompt}` : prompt, { signal, cache: false, onText: ({ text: all, delta }) => onText?.(delta || '', all || '') });
+      text = r?.text || '';
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err;
+      if (err?.code === 'not_granted') throw new AIError('Claude is switched off for this page. Allow it in the page’s permissions to use the coach.', true);
+      if (err?.code === 'rate_limited') throw new AIError('Too many requests just now: try again in a minute.', false);
+      throw new AIError(err?.message || 'The request to Claude failed.', false);
+    }
+    return json ? parseModelJSON(text) : text;
+  }
+  if (window.claude?.use && !window.claude?.complete) throw new AIError('The coach needs Claude, which this page can’t reach right now.', true);
   if (window.claude?.complete) {
     text = await window.claude.complete(system ? `${system}\n\n${prompt}` : prompt);
     onText?.(text, text);
@@ -2332,6 +2381,21 @@ const ENG = {
   LAT: 5.2,              // m/s²: sideways grip when turning at speed (a sprinter runs an arc)
   DRIB_F: 6,             // a ball knocked on while dribbling slows this fast relative to the runner
   TR_LOSS: 5, TR_WIN: 6, // seconds a transition instruction governs after the ball changes hands
+  // Calibrated against full matches: about 25 shots, 2.5 goals, 5 corners a side
+  // and an hour of ball in play per game, with possession, pressing and line
+  // height that differ by style the way they do in real football.
+  SHOT_IN: 0.02, SHOT_OUT: 0.015, SHOT_K: 1.3, // when a shot is worth taking, in and outside the box
+  SEEN_XG: 0.45,                              // how much a shooter sees the bodies in the way
+  MARK_BD: 30, MARK_MIX: 0.25, MARK_RANGE: 1, // everyone marks tight this close to goal; how much zonal midfielders mark
+  PROG_K: 1, THREAT_BASE: 0.006,              // what ground gained is worth; the value of simply having the ball
+  PASS_SD_K: 1, V0_SD: 0.05, MISPLACE: 1.5,   // how far a pass strays; how often one is badly misplaced
+  PRESS_PASS: 1,                              // pressers who set off for the receiver while a pass travels
+  RECV_T: 1.6,                                // seconds from receiving to playing it, before skill and tempo
+  SWITCH_K: 0.4,                              // how often a long switch of play is even considered
+  AIR_DEF_R: 2.4, HEAD_SHOT: 0.05, BOX_FOUL: 0.2, // defenders' reach for a high ball; when a header is worth aiming at goal; fouls in the box
+  CORNER_HEAD: 0.45, CORNER_BLOCK: 0.4,       // crosses headed behind, blocked shots deflected behind
+  CLEAR_TOUCH: 0.5, CROSS_BLOCK: 0.35,        // a wide clearance under pressure kicked into touch; crosses blocked behind
+  OFF_NOISE: 2.2,                             // how badly a passer judges the offside line
 };
 
 // Seeded random numbers so any run can be replayed exactly.
@@ -2680,7 +2744,7 @@ function opponentTeam(id) {
 /* ---------------- World ---------------- */
 const newStats = () => ({ passes: 0, passesOk: 0, passLen: 0, long: 0, crosses: 0, crossesOk: 0, shots: 0, onTarget: 0, goals: 0, xg: 0, headers: 0,
   takeOns: 0, takeOnsOk: 0, tackles: 0, tacklesOk: 0, fouls: 0, offsides: 0, aerials: 0, aerialsWon: 0, lost: 0, regains: 0, highRegains: 0,
-  cpRegains: 0, trapWins: 0, corners: 0, possT: 0, boxEntries: 0, final3: 0, clearances: 0 });
+  cpRegains: 0, trapWins: 0, corners: 0, possT: 0, boxEntries: 0, final3: 0, clearances: 0, ppdaPass: 0, ppdaAct: 0 });
 
 // input: { teams: { home, away } each { name, tactic: { formation, roles, instr }, lineup: [11 × { name, pos, a }] },
 //          pos: { home: [[x, y] × 11], away: [...] }, ball: { x, y }, poss, holder (slot index), seed, maxT, transition }
@@ -2704,6 +2768,7 @@ function engCreate(input) {
         until: 0, stun: 0, nextDecide: 0, gotAt: -9, runStart: -9, runKind: '', zone: -1, marking: null, vs: null, heavy: false, freeT: 0, freeLogged: false,
         vmax: 0, acc: 0, jog: 0, react: 0, pi: 'normal', pk: 1, goAt: 0, order: null, face: team === 'home' ? 0 : Math.PI, vh: new Float32Array(16), lag: 3 };
       p.vmax = vmaxOf(p); p.acc = accOf(p); p.jog = jogOf(p); p.react = reactOf(p);
+      if (input.names && p.name) p.tagS = p.name;
       p.lag = clamp(Math.round(p.react / ENG.DT), 1, 7);           // ticks behind what he sees
       p.pi = PLAYER_PRESS[spec.tactic.pi?.[i]] ? spec.tactic.pi[i] : 'normal';
       p.pk = (p.R.press ?? 1) * PLAYER_PRESS[p.pi].k;             // how eagerly he presses
@@ -2759,7 +2824,7 @@ function nearestDist(pt, list) {
   return bd;
 }
 const keeperOf = (w, team) => w.by[team][0];
-const tag = (p) => `${p.team === 'home' ? 'Blue' : 'Red'} #${p.num}`;
+const tag = (p) => p.tagS || `${p.team === 'home' ? 'Blue' : 'Red'} #${p.num}`;
 function log(w, text, kind = '', team = null) { w.events.push({ t: w.t, text, kind, team }); }
 function moment(w, kind, team, data) { w.moments.push({ kind, team, vs: oppOf(team), t: w.t, ...data }); }
 const depthVel = (team, p) => (team === 'home' ? p.vx : -p.vx);
@@ -2771,7 +2836,7 @@ const inBox = (team, pt) => depthOf(team, pt.x) > PITCH.L - PITCH.boxD && Math.a
 function threatAt(team, p) {
   const u = depthOf(team, p.x), dg = hyp(PITCH.L - u, p.y - MID);
   const central = 1 - Math.min(1, Math.abs(p.y - MID) / 40) * 0.35;
-  return 0.35 * Math.exp(-dg / 12) * central;
+  return (ENG.THREAT_BASE + 0.35 * Math.exp(-dg / 12)) * central;
 }
 
 // Offside line for attackers of `team` (in their depth): the second-last
@@ -3004,11 +3069,13 @@ function thinkDefend(w, team) {
 }
 function thinkDefend0(w, team) {
   const Tm = w.T[team], ins = Tm.ins, b = w.ball, opp = oppOf(team);
-  const bd = depthOf(team, b.x), bdS = Math.max(depthOf(team, w.bsx ?? b.x), bd - 12);
+  // The block steps up slowly when the ball goes away, but drops at once
+  // when it comes towards goal: defenders retreat the moment it is played forward.
+  const bd = depthOf(team, b.x), bdS = Math.min(bd, Math.max(depthOf(team, w.bsx ?? b.x), bd - 12));
   const since = w.t - Tm.lostAt;
   const cpress = !w.setup && ((ins.onLoss === 'counterpress' && since < ENG.TR_LOSS) || (ins.onLoss === 'mixed' && since < 2.2));
   const regroup = ins.onLoss === 'regroup' && since < ENG.TR_LOSS;
-  const carrier = b.state === 'held' && b.owner.team === opp ? b.owner : null;
+  const carrier = b.state === 'held' && b.owner.team === opp && !(w.gkHold && w.gkHold.gk === b.owner) ? b.owner : null;
   const L0 = LINE_U[ins.line];
   let lineU = clamp(Math.min(L0, bdS - 9, bd - 4), 11.5, L0);
   // Offside trap: the line steps up together when the ball goes backwards.
@@ -3057,6 +3124,24 @@ function thinkDefend0(w, team) {
       const a = od.vsP, g = { x: xAtDepth(team, 0), y: MID }, k = 1.3 / Math.max(hyp(a.x - g.x, a.y - g.y), 1);
       d.target = { x: a.x + (g.x - a.x) * k, y: a.y + (g.y - a.y) * k };
       d.mode = 'mark'; d.marking = a.id; d.spd = d.vmax * 0.92; busy.add(d); taken.add(a);
+    }
+  }
+  // Pressing on the pass: while a pass travels into our pressing zone, the
+  // man who will press the receiver sets off for him, so the receiver has a
+  // defender arriving as the ball does (the classic pressing trigger).
+  const rec = inFlight && b.intended && b.intended.team === opp ? b.intended : null;
+  if (rec && ENG.PRESS_PASS) {
+    const aim = b.state === 'air' ? b.to : b.aim || rec, au = depthOf(team, aim.x);
+    if (au <= PRESS_ZONE[ins.engage] + 6 || cpress) {
+      const n = (ins.press === 'more' || cpress ? 2 : 1) * (au < 30 ? 1 : ENG.PRESS_PASS);
+      const cands = mine.filter((d) => d.pos !== 'GK' && !busy.has(d) && d.stun <= w.t && d.pi !== 'hold' && !d.R.dropOff && d.order?.kind !== 'hold')
+        .map((d) => ({ d, t: runT(d, aim.x, aim.y, 1.5) / Math.sqrt(d.pk) })).filter((q) => q.t < 3).sort((a, c) => a.t - c.t);
+      const g = { x: xAtDepth(team, 0), y: MID };
+      for (let i = 0; i < Math.min(Math.round(n), cands.length); i++) {
+        const d = cands[i].d, k = (1.2 + i * 2.5) / Math.max(hyp(g.x - aim.x, g.y - aim.y), 1);
+        d.target = { x: aim.x + (g.x - aim.x) * k, y: aim.y + (g.y - aim.y) * k };
+        d.mode = 'press'; d.spd = d.vmax * (0.86 + 0.01 * at(d, 'work')); busy.add(d); taken.add(rec);
+      }
     }
   }
   // Runners going beyond the line: the nearest defender tracks him, once
@@ -3166,8 +3251,8 @@ function thinkDefend0(w, team) {
       if (tgt) { d.target = { x: tgt.x + (carrier.x - tgt.x) * 0.3, y: tgt.y + (carrier.y - tgt.y) * 0.3 }; d.mode = 'screen'; continue; }
     }
     // In and around the box everyone marks tight, whatever the plan.
-    const man = tight || (mixed && d.unit === 'D') || bd < 30;
-    const range = man ? (d.unit === 'D' ? 15 : 12) : d.unit === 'D' ? 8 : 6;
+    const man = tight || (mixed && d.unit === 'D') || bd < ENG.MARK_BD;
+    const range = man ? (d.unit === 'D' ? 15 : 12) : (d.unit === 'D' ? 8 : 6) * ENG.MARK_RANGE;
     let mark = null, md = range;
     for (const a of attackers) {
       if (a === carrier || taken.has(a)) continue;
@@ -3178,7 +3263,7 @@ function thinkDefend0(w, team) {
     taken.add(mark);
     const g = { x: xAtDepth(team, 0), y: MID }, k = 1.3 / Math.max(hyp(mark.x - g.x, mark.y - g.y), 1);
     const gs = { x: mark.x + (g.x - mark.x) * k, y: mark.y + (g.y - mark.y) * k };
-    const mix = man ? 0.9 : d.unit === 'D' ? 0.5 : 0.25;
+    const mix = man ? 0.9 : d.unit === 'D' ? Math.max(0.5, ENG.MARK_MIX) : ENG.MARK_MIX;
     d.target = { x: d.target.x + (gs.x - d.target.x) * mix, y: d.target.y + (gs.y - d.target.y) * mix };
     d.marking = mark.id;
     if (man) d.spd = Math.max(d.spd, d.vmax * 0.8);
@@ -3366,7 +3451,7 @@ function options(w, c) {
   const tempo = TEMPO[ins.tempo];
   // Risk: what losing it costs, and what ground gained is worth.
   const aversion = tempo.risk * (1 - 0.4 * (R.risk || 0)) * (counter ? 0.7 : secure ? 1.6 : 1);
-  const progW = tempo.prog * (counter ? 2 : secure ? 0.5 : 1);
+  const progW = tempo.prog * ENG.PROG_K * (counter ? 2 : secure ? 0.5 : 1);
   const vis = at(c, 'vision') + (R.vision || 0);
   const maxGround = 20 + 1.3 * vis;
   const seesRuns = w.rng() < 0.35 + 0.035 * vis;
@@ -3394,7 +3479,7 @@ function options(w, c) {
     if (d < 5) return;
     const air = kind === 'long' || kind === 'switch';
     if (!air && (d > maxGround || (gain < -4 && d > 22))) return;
-    if (air && (d < 18 || d > (isGK ? 65 : 58) || (kind === 'long' && gain < 8))) return;
+    if (air && (d < 18 || d > (isGK ? 72 : deep && kind === 'long' ? 65 : 58) || (kind === 'long' && gain < 8))) return;
     let odds, v0 = 0, T;
     if (air) ({ p: odds, T } = airOdds(w, c, to, q, team, false));
     else { v0 = groundV0(d, c, kind === 'through'); ({ p: odds, T } = groundOdds(w, c, to, q, v0, team)); }
@@ -3404,7 +3489,7 @@ function options(w, c) {
     if (air && kind === 'long') value *= q.R.target ? 0.75 : 0.55;
     // A switch hangs in the air while their block shifts across.
     if (kind === 'switch') value *= 0.75;
-    const seenU = depthOf(team, q.x) + gauss(w.rng) * (1.3 - vis / 25);
+    const seenU = depthOf(team, q.x) + gauss(w.rng) * (1.3 - vis / 25) * ENG.OFF_NOISE;
     const off = seenU > offU2 && depthOf(team, q.x) > PITCH.L / 2 ? 0.25 : 0;
     const u = odds * value - (1 - odds) * lossAt(to) + pref(d, air, to, gain) - off;
     opts.push({ kind: 'pass', type: kind, to, rec: q, odds, v0, T, u, gain, d, air, off: off > 0 });
@@ -3412,7 +3497,7 @@ function options(w, c) {
   for (const q of w.by[team]) {
     if (q === c || q.stun > w.t) continue;
     const dq = hyp(q.x - c.x, q.y - c.y);
-    if (dq > 62) continue;
+    if (dq > 70) continue;
     // Play it into his path: where he will be when the ball arrives.
     let to = { x: q.x, y: q.y };
     for (let k = 0; k < 2; k++) {
@@ -3431,7 +3516,7 @@ function options(w, c) {
     const longOk = vis >= 11 || R.long || ins.passing === 'direct' || (deep && ins.buildUp !== 'short') || counter;
     if (longOk && dt > 25) {
       const lateral = Math.abs(to.y - c.y);
-      if (lateral > 25 && !isGK && depthOf(team, to.x) > cu - 3 && Math.abs(to.y - MID) > 16 && w.rng() < 0.15 + 0.03 * vis) addPass(q, to, 'switch');
+      if (lateral > 25 && !isGK && depthOf(team, to.x) > cu - 3 && Math.abs(to.y - MID) > 16 && w.rng() < (0.15 + 0.03 * vis) * ENG.SWITCH_K) addPass(q, to, 'switch');
       else if (q.pos !== 'GK' && (q.unit === 'A' || q.pos === 'ST' || q.mode === 'run')) addPass(q, sp > 3 ? { x: clamp(to.x + (q.vx / sp) * 6, 1, PITCH.L - 1), y: to.y } : to, 'long');
     }
   }
@@ -3469,13 +3554,12 @@ function options(w, c) {
     // Shoot when it is on.
     const gx = team === 'home' ? PITCH.L : 0;
     if (hyp(gx - c.x, MID - c.y) < 32) {
-      const sm = shotModel(w, team, c, false);
-      if (sm.xg >= 0.015) {
-        const box = inBox(team, c);
+      const sm = shotModel(w, team, c, false), box = inBox(team, c);
+      if (sm.xg >= (box ? ENG.SHOT_IN : ENG.SHOT_OUT)) {
         const bias = (ins.final === 'workIn' ? (box ? 1.05 : 0.55) : ins.final === 'shoot' ? (box ? 1.05 : 1.6) : 1) * (1 + (R.shoot || 0));
         // Shooters see the goal more than the bodies in front of it.
-        const seen = sm.xg * 0.2 + sm.clear * 0.8;
-        opts.push({ kind: 'shoot', xg: sm.xg, u: seen * (box ? 1.15 : 1.4) * bias });
+        const seen = sm.xg * ENG.SEEN_XG + sm.clear * (1 - ENG.SEEN_XG);
+        opts.push({ kind: 'shoot', xg: sm.xg, u: seen * (box ? 1.15 : 1.4) * bias * ENG.SHOT_K });
       }
     }
     // Shield it and wait for support (a target man with a defender on his back).
@@ -3485,6 +3569,14 @@ function options(w, c) {
   }
   // Keep it: unpressed, nothing better on.
   if (pressure > 4.5) opts.push({ kind: 'hold', u: here * (ins.tempo === 'slow' ? 0.97 : ins.tempo === 'fast' ? 0.8 : 0.9) + (isGK ? 0.001 : 0) });
+  // A set piece, or a keeper with it in his hands: he has to play it.
+  const rs = w.restart && w.restart.taker === c ? w.restart.kind : w.gkHold && w.gkHold.gk === c ? 'hands' : null;
+  if (rs) {
+    const ok = (o) => (rs === 'freeKick' ? o.kind === 'pass' || o.kind === 'shoot' : o.kind === 'pass')
+      && (rs !== 'throw' || o.d <= 30) && (rs !== 'kickoff' || (o.d <= 25 && o.gain <= 2));
+    const keep = opts.filter(ok);
+    if (keep.length) return keep;
+  }
   return opts;
 }
 
@@ -3529,7 +3621,9 @@ const takeOnP = (c, d, ins) => sigmoid((at(c, 'dribbling') - at(d, 'tackling')) 
 // near-equal alternative. Composure and pressure set how sharp the choice is.
 function choose(w, c, opts) {
   // Crosses are long odds by nature; their value already allows for that.
-  const risky = (o) => o.kind === 'pass' && o.type !== 'cross';
+  // A side that plays direct accepts a long ball being a contest.
+  const ins = w.T[c.team].ins, direct = ins.passing === 'direct' || (ins.buildUp === 'long' && depthOf(c.team, c.x) < 35);
+  const risky = (o) => o.kind === 'pass' && o.type !== 'cross' && !(direct && o.type === 'long' && o.odds >= 0.25);
   const decent = opts.filter((o) => !risky(o) || o.odds >= 0.55);
   let pool = (decent.length ? decent : opts).filter((o) => !risky(o) || o.odds >= 0.3 || !decent.length);
   if (!pool.length) pool = opts;
@@ -3547,6 +3641,8 @@ function decide(w, c) {
   const opts = options(w, c);
   if (!opts.length) { c.nextDecide = w.t + 0.3; return; }
   let o = choose(w, c, opts);
+  // A set piece is over once the taker has made his choice.
+  if (w.restart && w.restart.taker === c) { w.noOff = w.restart.noOff; w.restart = null; }
   // The coach said where this one goes when he gets it. He plays it if the
   // pass is on at all; if it isn't, he looks for it for a second or so.
   const od = c.order;
@@ -3581,17 +3677,25 @@ function releaseInfo(w, c) {
 
 function kickGround(w, c, o) {
   const team = c.team, b = w.ball, pressed = nearestDist(c, w.by[oppOf(team)]) < 2;
-  const sd = (0.045 - 0.0018 * passSkill(c)) * (pressed ? 1.5 - 0.02 * at(c, 'composure') : 1);
-  const ang = Math.atan2(o.to.y - c.y, o.to.x - c.x) + gauss(w.rng) * Math.max(sd, 0.004);
-  const v0 = o.v0 * (1 + gauss(w.rng) * 0.05);
+  const sd = (0.045 - 0.0018 * passSkill(c)) * ENG.PASS_SD_K * (pressed ? 1.5 - 0.02 * at(c, 'composure') : 1);
+  let ang = Math.atan2(o.to.y - c.y, o.to.x - c.x) + gauss(w.rng) * Math.max(sd, 0.004);
+  let v0 = o.v0 * (1 + gauss(w.rng) * ENG.V0_SD);
+  // Now and then a pass is simply misplaced: under-hit, over-hit or off line.
+  // Longer passes, worse passers and a man in your face make it likelier.
+  const pMis = clamp((0.012 + 0.0022 * o.d) * (1.6 - 0.05 * passSkill(c)) * (pressed ? 1.6 : 1), 0, 0.3) * ENG.MISPLACE;
+  if (w.rng() < pMis) { ang += (w.rng() < 0.5 ? -1 : 1) * (0.2 + w.rng() * 0.3); v0 *= 0.75 + w.rng() * 0.6; }
   c.face = ang;
   Object.assign(b, { state: 'roll', owner: null, x: c.x + Math.cos(ang) * 0.6, y: c.y + Math.sin(ang) * 0.6, h: 0, vx: Math.cos(ang) * v0, vy: Math.sin(ang) * v0, kind: o.type, intended: o.rec,
     passer: c, t0: w.t, team, tried: new Set(), odds: o.odds, from: { x: c.x, y: c.y }, aim: o.to, ...releaseInfo(w, c) });
+  // No offside from a throw-in, goal kick or corner; the keeper has let go.
+  if (w.noOff) b.offIds = new Set();
+  w.noOff = false; w.gkHold = null;
+  if (depthOf(team, c.x) < 63) w.T[team].S.ppdaPass++;
   o.rec.mode = 'receive'; o.rec.target = o.to; o.rec.spd = o.rec.vmax; o.rec.goAt = w.t + o.rec.react * 0.5;
   c.mode = 'shape';
   const S = w.T[team].S;
   S.passes++; S.passLen += o.d; if (o.d > 30) S.long++;
-  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: false, team, type: o.type });
+  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: false, team, type: o.type, u: depthOf(team, c.x) });
   const verb = o.type === 'through' ? 'slides a through ball to' : o.type === 'cutback' ? 'cuts it back for' : o.gain < -3 ? 'plays it back to' : 'passes to';
   log(w, `${tag(c)} ${verb} ${tag(o.rec)}`, 'pass', team);
   assignInterceptors(w, team);
@@ -3601,15 +3705,25 @@ function kickAir(w, c, o) {
   const team = c.team, b = w.ball, cross = o.type === 'cross';
   const skill = cross ? at(c, 'crossing') : passSkill(c);
   const pressed = nearestDist(c, w.by[oppOf(team)]) < 2;
-  const sd = o.d * (0.085 - 0.0032 * skill) * (pressed ? 1.3 : 1);
+  const sd = o.d * (0.085 - 0.0032 * skill) * (pressed ? 1.3 : 1) * (w.rng() < 0.1 * ENG.MISPLACE ? 3 : 1);
   const land = { x: clamp(o.to.x + gauss(w.rng) * sd, 0.5, PITCH.L - 0.5), y: clamp(o.to.y + gauss(w.rng) * sd, 0.5, PITCH.W - 0.5) };
   const d = hyp(land.x - c.x, land.y - c.y), { T } = airFlight(d);
   c.face = Math.atan2(land.y - c.y, land.x - c.x);
   Object.assign(b, { state: 'air', owner: null, x: c.x, y: c.y, h: 0, from: { x: c.x, y: c.y }, to: land, t0: w.t, T, H: cross ? 3 + 0.06 * d : 2.5 + 0.13 * d,
     kind: o.type, intended: o.rec, passer: c, team, contested: false, odds: o.odds, zone: o.zone, ...releaseInfo(w, c) });
+  if (w.noOff) b.offIds = new Set();
+  w.noOff = false; w.gkHold = null;
+  if (depthOf(team, c.x) < 63 && !cross) w.T[team].S.ppdaPass++;
   const S = w.T[team].S;
   if (cross) {
     S.crosses++;
+    // A defender in front of the crosser blocks it, usually behind for a corner.
+    const blk = w.by[oppOf(team)].find((f) => f.pos !== 'GK' && f.stun <= w.t && hyp(f.x - c.x, f.y - c.y) < 1.8 && (land.x - c.x) * (f.x - c.x) + (land.y - c.y) * (f.y - c.y) > 0);
+    if (blk && w.rng() < ENG.CROSS_BLOCK) {
+      log(w, `${tag(blk)} blocks the cross behind`, 'def', blk.team); S.corners++;
+      Object.assign(b, { state: 'roll', x: blk.x, y: blk.y, vx: 0, vy: 0 });
+      return endRun(w, 'corner', team);
+    }
     const inB = (t) => w.by[t].filter((p) => inBox(team, p)).length;
     moment(w, 'cross', team, { ids: [c.id], x: land.x, y: land.y, att: inB(team), def: inB(oppOf(team)), zone: o.zone });
     log(w, `${tag(c)} crosses to the ${{ near: 'near post', far: 'far post', spot: 'penalty spot' }[o.zone] || 'box'}`, 'pass', team);
@@ -3617,7 +3731,7 @@ function kickAir(w, c, o) {
     S.passes++; S.passLen += o.d; S.long++;
     log(w, `${tag(c)} ${o.type === 'switch' ? 'switches play to' : 'goes long to'} ${tag(o.rec)}`, 'pass', team);
   }
-  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: true, cross, team, type: o.type });
+  (w.passLog ||= []).push({ odds: o.odds, ok: null, d: o.d, gain: o.gain, air: true, cross, team, type: o.type, u: depthOf(team, c.x) });
   c.mode = 'shape';
   o.rec.mode = 'receive'; o.rec.target = land; o.rec.spd = o.rec.vmax; o.rec.goAt = w.t + o.rec.react * 0.5;
   airChasers(w, team);
@@ -3625,11 +3739,14 @@ function kickAir(w, c, o) {
 
 function clearBall(w, c) {
   const team = c.team, b = w.ball;
-  const land = { x: xAtDepth(team, clamp(depthOf(team, c.x) + 38 + w.rng() * 16, 0, PITCH.L - 4)), y: clamp(c.y + (w.rng() - 0.5) * 30, 3, PITCH.W - 3) };
+  let land = { x: xAtDepth(team, clamp(depthOf(team, c.x) + 38 + w.rng() * 16, 0, PITCH.L - 4)), y: clamp(c.y + (w.rng() - 0.5) * 30, 3, PITCH.W - 3) };
+  // Out wide, under pressure, the safe clearance is into touch.
+  if (Math.abs(c.y - MID) > 12 && w.rng() < ENG.CLEAR_TOUCH) land = { x: xAtDepth(team, clamp(depthOf(team, c.x) + 18 + w.rng() * 20, 0, PITCH.L - 4)), y: c.y < MID ? -3 : PITCH.W + 3 };
   const d = hyp(land.x - c.x, land.y - c.y), { T } = airFlight(d);
   Object.assign(b, { state: 'air', owner: null, x: c.x, y: c.y, h: 0, from: { x: c.x, y: c.y }, to: land, t0: w.t, T, H: 8 + 0.08 * d, kind: 'clear',
     intended: null, passer: c, team, contested: false, ...releaseInfo(w, c) });
   w.T[team].S.clearances++;
+  w.noOff = false; w.gkHold = null; w.restart = null;
   log(w, `${tag(c)} clears it`, 'pass', team);
   c.mode = 'shape';
   airChasers(w, team);
@@ -3650,7 +3767,7 @@ function assignInterceptors(w, team) {
       }
       return { f, ...best };
     }).filter((q) => q.slack > -0.25).sort((a, b) => b.slack - a.slack);
-  for (const q of cands) { if (n++ >= 2) break; q.f.target = q.pt; q.f.spd = q.f.vmax; q.f.mode = 'intercept'; q.f.goAt = w.t + q.f.react; }
+  for (const q of cands) { if (n++ >= (ENG.NI ?? 2)) break; q.f.target = q.pt; q.f.spd = q.f.vmax; q.f.mode = 'intercept'; q.f.goAt = w.t + q.f.react; }
 }
 // Under a high ball, the receiver and the nearest defenders go for where it lands.
 function airChasers(w, team) {
@@ -3665,6 +3782,7 @@ function airChasers(w, team) {
 
 /* ---------------- Shots ---------------- */
 function shoot(w, c, header) {
+  w.noOff = false; w.gkHold = null; w.restart = null;
   const team = c.team, opp = oppOf(team), gx = team === 'home' ? PITCH.L : 0;
   const sm = shotModel(w, team, c, header);
   const S = w.T[team].S, gk = keeperOf(w, opp);
@@ -3736,7 +3854,7 @@ function shotArrives(w) {
     return looseFrom(w, gk, opp === 'home' ? 0 : Math.PI, 1.3, 7 + w.rng() * 4, opp);
   }
   // Blocked: it cannons off the defender.
-  if (w.rng() < 0.25) { S.corners++; return endRun(w, 'corner', team); }
+  if (w.rng() < ENG.CORNER_BLOCK) { S.corners++; return endRun(w, 'corner', team); }
   const back = Math.atan2(b.from.y - b.to.y, b.from.x - b.to.x);
   return looseFrom(w, b.blocker, back, 1.2, 4 + w.rng() * 5, opp);
 }
@@ -3768,11 +3886,18 @@ function takeBall(w, p, how) {
   Object.assign(b, { state: 'held', owner: p, team: p.team, h: 0, offIds: null, intended: null,
     rel: clamp(rl, 0.4, 1.1), rv: cush, ux: inc > 1 ? b.vx / inc : rx / rl, uy: inc > 1 ? b.vy / inc : ry / rl, vx: 0, vy: 0 });
   p.gotAt = w.t; p.mode = 'carry'; p.heavy = false; p.touchOut = false;
+  w.gkHold = null;
+  if (w.match && p.pos === 'GK' && inBox(oppOf(p.team), p) && (how === 'save' || how === 'claim' || p.team !== prev)) {
+    w.gkHold = { gk: p, until: w.t + 2 + w.rng() * 2.5 };
+  }
   if (p.order && p.order.kind === 'run' && p.team === b.team && wasPass) { p.order.found = true; if (!p.order.done) { p.order.done = true; p.order.ok = true; p.order.at = w.t; } }
   // A man you told someone to press or mark: did he get it, and was ours close?
   for (const d of w.by[oppOf(p.team)]) if (d.order && (d.order.kind === 'mark' || d.order.kind === 'press') && d.order.vsP === p && p.team !== prev) d.order.lostHim = (d.order.lostHim || 0) + 1;
   for (const d of w.by[oppOf(p.team)]) if (d.order && d.order.kind === 'mark' && d.order.vsP === p && p.team === prev) { if (hyp(d.x - p.x, d.y - p.y) < 3) d.order.tight = (d.order.tight || 0) + 1; else d.order.loose = (d.order.loose || 0) + 1; }
-  p.nextDecide = w.t + clamp(0.52 - 0.012 * at(p, 'touch') + { slow: 0.08, normal: 0, fast: -0.07 }[w.T[p.team].ins.tempo], 0.18, 0.6);
+  // He controls it and looks up before he plays it: quicker with a good first
+  // touch and a quick tempo, and much quicker with a man closing him down
+  // (the decision is brought forward when someone gets close).
+  p.nextDecide = w.gkHold ? w.gkHold.until : w.t + clamp(ENG.RECV_T - 0.012 * at(p, 'touch') + { slow: 0.15, normal: 0, fast: -0.15 }[w.T[p.team].ins.tempo] + (w.rng() - 0.5) * 0.3, 0.18, 1.4);
   if (p.team !== prev) {
     if (wasPass && w.passLog?.length && w.passLog.at(-1).ok === null) w.passLog.at(-1).ok = false;
     turnover(w, p, how);
@@ -3834,6 +3959,7 @@ function turnover(w, p, how) {
   w.T[lost].offBall = w.t;
   w.T[team].wonAt = w.t; w.T[lost].lostAt = w.t; w.T[team].possStart = w.t;
   St.regains++; Sl.lost++;
+  if ((how === 'intercept' || how === 'loose' || how === 'header') && depthOf(lost, p.x) < 63) St.ppdaAct++;
   const u = depthOf(team, p.x);
   if (depthOf(lost, p.x) < 35) w.T[lost].F.lostOwnThird = true;
   const pt = w.T[team].ins.pressTo;
@@ -3863,13 +3989,14 @@ function turnover(w, p, how) {
 function tackleTick(w) {
   const b = w.ball, c = b.owner, team = c.team, opp = oppOf(team), ins = w.T[opp].ins;
   if (w.t - c.gotAt < 0.3) return;                     // nobody is tackled on his first touch
+  if (w.restart || (w.gkHold && w.gkHold.gk === c)) return;   // a set piece, or the ball in the keeper's hands
   // A take-on is settled the moment he reaches his man.
   if (c.mode === 'takeOn' && c.vs && c.vs.stun <= w.t && hyp(c.vs.x - c.x, c.vs.y - c.y) < 1.4) {
     const d = c.vs, S = w.T[team].S;
     S.takeOns++;
     c.vs = null;
     if (w.rng() < takeOnP(c, d, w.T[team].ins)) {
-      if (w.rng() < FOUL_P[ins.tackling] * 0.45) return foul(w, d, c);
+      if (w.rng() < FOUL_P[ins.tackling] * 0.45 * (inBox(team, c) ? ENG.BOX_FOUL : 1)) return foul(w, d, c);
       S.takeOnsOk++;
       d.stun = w.t + 0.9;
       log(w, `${tag(c)} beats ${tag(d)}`, 'run', team);
@@ -3893,7 +4020,7 @@ function tackleTick(w) {
     const engaged = d.mode === 'press' || d.mode === 'intercept';
     if (dd > (engaged ? 1.6 : 1.25)) continue;
     let rate = (engaged ? 1 : 0.35) * TACKLE_RATE[ins.tackling] * (0.55 + 0.045 * at(d, 'tackling')) * (d.R.tackle || 1);
-    if (depthOf(opp, c.x) < 24) rate *= inBox(team, c) ? (ins.tackling === 'hard' ? 1.6 : 1.1) : 1.8;
+    if (depthOf(opp, c.x) < 24) rate *= inBox(team, c) ? (ins.tackling === 'hard' ? 1.2 : 0.9) : 1.8;
     else if (engaged && counterPressing(w, opp)) rate *= 2;
     if (w.rng() < rate * ENG.DT) return tackle(w, d, c, false);
   }
@@ -3902,6 +4029,7 @@ function tackleTick(w) {
 function tackle(w, d, c, takeOn) {
   const opp = d.team, team = c.team, ins = w.T[opp].ins, S = w.T[opp].S;
   S.tackles++;
+  if (depthOf(team, c.x) < 63) S.ppdaAct++;
   const ts = at(d, 'tackling') + 0.3 * (at(d, 'strength') - 10) + 0.2 * (at(d, 'positioning') - 10);
   const cs = 0.7 * at(c, 'dribbling') + 0.3 * at(c, 'composure') + 0.3 * (at(c, 'strength') - 10) + (c.mode === 'shield' ? 2 * (c.R.holdUp || 0.5) : 0) - (c.mode === 'dribble' ? 0.8 : 0);
   const p = takeOn ? 1 : sigmoid((ts - cs - 1.5) / 3);
@@ -3911,7 +4039,8 @@ function tackle(w, d, c, takeOn) {
     log(w, `${tag(d)} pokes it away from ${tag(c)}`, 'win', opp);
     return looseFrom(w, c, Math.atan2(c.y - d.y, c.x - d.x), 1.4, 3 + w.rng() * 4, opp);
   }
-  const foulP = FOUL_P[ins.tackling] * (1.25 - at(d, 'tackling') / 25);
+  // In the box defenders know a foul is a penalty, and most challenges are clean.
+  const foulP = FOUL_P[ins.tackling] * (1.25 - at(d, 'tackling') / 25) * (inBox(team, c) ? ENG.BOX_FOUL : 1);
   if (w.rng() < foulP) return foul(w, d, c);
   d.stun = w.t + (ins.tackling === 'hard' ? 0.9 : 0.55);
   if (takeOn) { w.T[team].S.takeOnsOk++; log(w, `${tag(c)} skips past ${tag(d)}`, 'run', team); if (depthOf(team, c.x) > 60) moment(w, 'dribblePast', team, { ids: [c.id], foes: [d.id], x: c.x, y: c.y }); }
@@ -3925,6 +4054,7 @@ function foul(w, d, c) {
     if (inBox(team, c)) {
       log(w, `${tag(d)} brings down ${tag(c)}: penalty!`, 'bad', opp);
       moment(w, 'penalty', team, { ids: [c.id], foes: [d.id], x: c.x, y: c.y });
+      if (w.match) return endRun(w, 'penaltyKick', team, { taker: c.id });
       const Sa = w.T[team].S, r = w.rng();
       Sa.shots++; Sa.xg += 0.76; w.T[team].F.shot = true;
       w.shots.push({ team, t: w.t, x: xAtDepth(team, PITCH.L - PITCH.spotX), y: MID, xg: 0.76, header: false, result: r < 0.76 ? 'goal' : 'saved', id: c.id, cause: 'penalty', counter: false, pen: true });
@@ -3932,6 +4062,7 @@ function foul(w, d, c) {
       Sa.onTarget++; log(w, 'Penalty saved!', 'shot', team);
       return endRun(w, 'penalty', team);
     }
+    if (depthOf(team, c.x) < 63) S.ppdaAct++;
     log(w, `Foul by ${tag(d)} on ${tag(c)}`, 'bad', opp);
     if (depthOf(team, c.x) > 70) moment(w, 'foul', team, { ids: [c.id], foes: [d.id], x: c.x, y: c.y });
     return endRun(w, 'foul', team);
@@ -3952,7 +4083,7 @@ function aerialContest(w, cands) {
     if (b.kind === 'cross' && p.team === kteam && inBox(kteam, p) && !(b.offIds && b.offIds.has(p.id))) {
       w.T[kteam].S.crossesOk++; moment(w, 'crossWon', kteam, { ids: [p.id], x: p.x, y: p.y });
       const sm = shotModel(w, kteam, p, true);
-      if (sm.xg > 0.03) { p.gotAt = w.t; return shoot(w, p, true); }
+      if (sm.xg > ENG.HEAD_SHOT) { p.gotAt = w.t; return shoot(w, p, true); }
     }
     if (w.rng() < ctrlProb(p, 9, true, nearestDist(p, w.by[oppOf(p.team)]))) return takeBall(w, p, 'control');
     p.heavy = true;
@@ -3975,13 +4106,17 @@ function aerialContest(w, cands) {
     if (b.kind === 'cross') { moment(w, 'crossWon', kteam, { ids: [p.id], x: p.x, y: p.y }); w.T[kteam].S.crossesOk++; }
     // A header at goal if he is in range, otherwise a knock-down.
     const sm = shotModel(w, kteam, p, true);
-    if (sm.xg > 0.03 && inBox(kteam, p)) { p.gotAt = w.t; return shoot(w, p, true); }
+    if (sm.xg > ENG.HEAD_SHOT && inBox(kteam, p)) { p.gotAt = w.t; return shoot(w, p, true); }
     log(w, `${tag(p)} wins the header`, 'run', kteam);
     const mate = w.by[kteam].filter((q) => q !== p && q.pos !== 'GK').sort((a, c) => hyp(a.x - p.x, a.y - p.y) - hyp(c.x - p.x, c.y - p.y))[0];
     const dir = mate ? Math.atan2(mate.y - p.y, mate.x - p.x) : (kteam === 'home' ? 0 : Math.PI);
     return looseFrom(w, p, dir, 0.5, 5 + w.rng() * 3, kteam);
   }
-  // The defending side heads it away.
+  // The defending side heads it away, often behind for a corner when it is a cross into the box.
+  if (b.kind === 'cross' && inBox(kteam, p) && w.rng() < ENG.CORNER_HEAD) {
+    log(w, `${tag(p)} heads it behind`, 'def', dteam); w.T[kteam].S.corners++;
+    return endRun(w, 'corner', kteam);
+  }
   log(w, `${tag(p)} heads it away`, 'def', dteam);
   const away = (dteam === 'home' ? 0 : Math.PI);
   return looseFrom(w, p, away, 0.9, 9 + w.rng() * 5, dteam);
@@ -4220,7 +4355,8 @@ function ballTick(w) {
     b.x = b.from.x + (b.to.x - b.from.x) * f; b.y = b.from.y + (b.to.y - b.from.y) * f;
     b.h = 4 * b.H * f * (1 - f);
     if (f >= 0.5 && b.h <= ENG.HEAD_H && !b.contested) {
-      const cands = w.players.filter((p) => p.stun <= w.t && hyp(p.x - b.x, p.y - b.y) < 1.7 && !(p === b.passer && w.t - b.t0 < 0.5));
+      // Defenders attack the ball from a little further: they jump into the man.
+      const cands = w.players.filter((p) => p.stun <= w.t && hyp(p.x - b.x, p.y - b.y) < (p.team === b.team ? 1.7 : ENG.AIR_DEF_R) && !(p === b.passer && w.t - b.t0 < 0.5));
       if (cands.length) { b.contested = true; return aerialContest(w, cands); }
     }
     if (f >= 1) {
@@ -4361,6 +4497,463 @@ function engRun(input, record = false) {
   while (!w.outcome) { engStep(w); if (record) snap(); }
   return w;
 }
+/* ================================================================
+   A whole match
+   The same engine run without stopping. When the ball goes dead the
+   referee's decision becomes a restart: the players walk into their
+   places while the clock runs on (the ball fetched, a goal celebrated),
+   then the taker plays it. Ninety minutes on the clock comes to about an
+   hour of ball in play, as in a real game. Every tick can be recorded
+   into a ring of frames, so any stretch of the last few minutes can be
+   replayed, and clips are cut around every shot.
+   ================================================================ */
+const MATCH_HALF = 45 * 60;
+// Seconds the players get to walk into place, and extra seconds the clock runs on.
+const RESTART = {
+  kickoff: { sim: 2.5, clock: 0 }, goal: { sim: 9, clock: 60 }, throw: { sim: 2.4, clock: 16 }, corner: { sim: 5.5, clock: 32 },
+  goalKick: { sim: 4.5, clock: 26 }, freeKick: { sim: 4, clock: 30 }, penalty: { sim: 6, clock: 60 },
+};
+const FRAME_N = 22 * 7 + 5;     // per player x, y, facing, speed, job, where he's going; ball x, y, height, holder; clock
+const RING_N = 1800;            // three minutes of frames
+
+// Kick-off: everyone in his own half, the kicking side's striker on the spot.
+function kickoffPositions(teams, kicker) {
+  const pos = {}, taker = {};
+  for (const t of ['home', 'away']) {
+    const form = FORMATIONS[teams[t].tactic.formation];
+    pos[t] = form.map((s) => {
+      const u = s[3] === 'G' ? 4 : clamp(3 + s[0] * 0.8, 8, 49), y = s[1];
+      return t === 'home' ? [u, y] : [PITCH.L - u, PITCH.W - y];
+    });
+    if (t === kicker) {
+      let k = -1, best = Infinity;
+      form.forEach((s, i) => { const c = (s[3] === 'A' ? 0 : s[3] === 'AM' ? 20 : 99) + Math.abs(s[1] - MID); if (c < best) { best = c; k = i; } });
+      taker[t] = k;
+      pos[t][k] = [t === 'home' ? PITCH.L / 2 - 0.6 : PITCH.L / 2 + 0.6, MID];
+    } else {
+      // Outside the centre circle.
+      pos[t] = pos[t].map(([x, y]) => { const d = hyp(x - PITCH.L / 2, y - MID); return d < 10 ? [PITCH.L / 2 + ((x - PITCH.L / 2) / Math.max(d, 0.1)) * 10, MID + ((y - MID) / Math.max(d, 0.1)) * 10] : [x, y]; });
+    }
+  }
+  return { pos, taker: taker[kicker] };
+}
+
+const newKpi = () => ({ lineSum: 0, lenSum: 0, oopN: 0, widthSum: 0, heightSum: 0, ipN: 0, f3T: 0, counters: 0 });
+
+function matchCreate({ teams, seed = 1, kickOff = 'home', record = true, ai = { home: false, away: true } }) {
+  const ko = kickoffPositions(teams, kickOff);
+  const w = engCreate({ teams, pos: ko.pos, ball: { x: PITCH.L / 2, y: MID }, poss: kickOff, holder: ko.taker, seed, maxT: Infinity, names: true });
+  w.match = true;
+  const rng = rngFrom(((seed >>> 0) ^ 0x51ed27) >>> 0);
+  const m = { w, rng, teams, clock: 0, half: 1, phase: 'play', score: { home: 0, away: 0 }, firstKick: kickOff,
+    stoppage: [60 + Math.floor(rng() * 4) * 30, 120 + Math.floor(rng() * 5) * 30],
+    record, ring: record ? new Float32Array(RING_N * FRAME_N) : null, frames: 0, feed: [], clips: [], pending: [], ai: { ...ai }, aiStage: { home: 0, away: 0 },
+    kpi: { home: newKpi(), away: newKpi() }, avg: [newAvg(), newAvg()], toIdx: 0, counter: null, xgLine: [], prevShot: false, lastPoss: kickOff, changes: [] };
+  beginRestart(m, 'kickoff', kickOff, { x: PITCH.L / 2, y: MID }, { ko: ko.pos, takerSlot: ko.taker });
+  addFeed(m, 'Kick-off', 'whistle', null);
+  if (record) snapFrame(m);
+  return m;
+}
+
+const matchMinute = (m, clock = m.clock) => {
+  const h = clock < MATCH_HALF || (m.half === 1 && clock <= MATCH_HALF + m.stoppage[0] + 60) ? 1 : 2, base = h === 1 ? 0 : MATCH_HALF;
+  const mins = Math.floor((clock - base) / 60) + 1;
+  return mins > 45 ? `${45 * h}+${mins - 45}’` : `${base / 60 + mins}’`;
+};
+function addFeed(m, text, kind, team, extra = {}) {
+  m.feed.push({ clock: m.clock, min: matchMinute(m), text, kind, team, frame: m.frames, ...extra });
+}
+
+// Who takes a set piece.
+function pickTaker(w, kind, team, spot, extra) {
+  const mine = w.by[team], out = mine.filter((p) => p.pos !== 'GK');
+  if (kind === 'kickoff') return mine[extra.takerSlot ?? 0] || out[0];
+  if (kind === 'goalKick') return mine[0];
+  if (kind === 'penalty') return (extra.takerId && w.byId[extra.takerId]?.team === team && out.find((p) => p.id === extra.takerId && at(p, 'finishing') >= 13)) || out.slice().sort((a, b) => at(b, 'finishing') + at(b, 'composure') - at(a, 'finishing') - at(a, 'composure'))[0];
+  if (kind === 'corner') return out.filter((p) => p.pos !== 'CB' && p.pos !== 'ST').sort((a, b) => at(b, 'crossing') - at(a, 'crossing'))[0] || out[0];
+  const u = depthOf(team, spot.x);
+  if (kind === 'freeKick') {
+    if (u < 18 && Math.abs(spot.y - MID) < 20) return mine[0];
+    if (u > 72 && Math.abs(spot.y - MID) > 14) return out.filter((p) => p.pos !== 'CB' && p.pos !== 'ST').sort((a, b) => at(b, 'crossing') - at(a, 'crossing'))[0] || out[0];
+    if (u > 72) return out.slice().sort((a, b) => at(b, 'finishing') + at(b, 'passing') - at(a, 'finishing') - at(a, 'passing'))[0];
+  }
+  // Throw-ins and other free kicks: the nearest man, full-backs and wide men first for a throw.
+  let best = null, bc = Infinity;
+  for (const p of out) {
+    const c = hyp(p.x - spot.x, p.y - spot.y) - (kind === 'throw' && ['FB', 'WB', 'WM', 'W'].includes(p.pos) ? 8 : 0);
+    if (c < bc) { bc = c; best = p; }
+  }
+  return best;
+}
+// Where the taker stands to take it.
+function takerSpot(d) {
+  const s = d.spot, A = d.team;
+  if (d.kind === 'throw') return { x: s.x, y: s.y <= 0 ? 0.6 : PITCH.W - 0.6 };
+  if (d.kind === 'corner') return { x: s.x + (s.x > PITCH.L / 2 ? 0.4 : -0.4), y: s.y + (s.y < MID ? -0.4 : 0.4) };
+  return { x: xAtDepth(A, depthOf(A, s.x) - 0.7), y: s.y };
+}
+
+function beginRestart(m, kind, team, spot, extra = {}) {
+  const w = m.w, b = w.ball, R = RESTART[extra.timing || kind];
+  const taker = pickTaker(w, kind, team, spot, extra);
+  Object.assign(b, { state: 'dead', owner: null, x: spot.x, y: spot.y, h: 0, vx: 0, vy: 0, team, intended: null, offIds: null, passer: null });
+  w.bsx = spot.x; w.bsy = spot.y;
+  w.poss = team; w.restart = null; w.gkHold = null; w.noOff = false;
+  for (const p of w.players) { p.mode = 'shape'; p.until = 0; p.goAt = 0; p.vs = null; p.marking = null; p.freeLogged = false; p.heavy = false; }
+  // A stoppage resets everything: no counter or counter-press carries over it.
+  for (const t of ['home', 'away']) { w.T[t].wonAt = -99; w.T[t].lostAt = -99; w.T[t].F = {}; }
+  w.dead = { kind, team, spot, taker, until: w.t + R.sim, start: w.t, rate: (R.sim + R.clock) / R.sim, ko: extra.ko || null };
+  w.nextThink = w.t;
+}
+
+// One tick while the ball is dead: everyone walks into place.
+function deadStep(m) {
+  const w = m.w, d = w.dead, b = w.ball;
+  w.tick++; w.t = Math.round(w.tick * ENG.DT * 1000) / 1000;
+  if (w.t >= w.nextThink) {
+    w.nextThink = w.t + ENG.THINK;
+    thinkAttack(w, d.team); thinkDefend(w, oppOf(d.team));
+    placeRestart(m);
+  }
+  move(w);
+  b.x = d.spot.x; b.y = d.spot.y;
+  const ts = takerSpot(d), tk = d.taker;
+  const ready = hyp(tk.x - ts.x, tk.y - ts.y) < 1.2 && (d.kind !== 'kickoff' || w.players.every((p) => hyp(p.x - p.target.x, p.y - p.target.y) < 4));
+  if (w.t >= d.until && (ready || w.t >= d.until + 5)) takeRestart(m);
+}
+
+// Set-piece positions, then the distance rules, on top of the normal shape.
+function placeRestart(m) {
+  const w = m.w, d = w.dead, A = d.team, D = oppOf(A), s = d.spot, uA = depthOf(A, s.x);
+  if (d.kind === 'kickoff' && d.ko) for (const t of ['home', 'away']) w.by[t].forEach((p, i) => { p.target = { x: d.ko[t][i][0], y: d.ko[t][i][1] }; p.mode = 'shape'; });
+  else if (d.kind === 'corner' || (d.kind === 'freeKick' && uA > 72 && Math.abs(s.y - MID) > 14)) boxSetPiece(w, d);
+  else if (d.kind === 'penalty') {
+    for (const p of w.players) {
+      if (p === d.taker || p === keeperOf(w, D)) continue;
+      const pu = depthOf(A, p.target.x);
+      if (pu > PITCH.L - 21) p.target = { x: xAtDepth(A, PITCH.L - 21 - (p.team === A ? 0 : 1)), y: clamp(p.target.y, MID - 18, MID + 18) };
+    }
+    const gk = keeperOf(w, D); gk.target = { x: xAtDepth(A, PITCH.L - 0.3), y: MID }; gk.mode = 'keeper';
+  } else if (d.kind === 'freeKick' && uA > 74 && Math.abs(s.y - MID) <= 14) wallFor(w, d);
+  // Opponents keep their distance; at a goal kick they stay out of the box.
+  const R = d.kind === 'throw' ? 3 : d.kind === 'kickoff' ? 0 : 9.4;
+  for (const p of w.by[D]) {
+    if (p.pos === 'GK' && d.kind !== 'goalKick') continue;
+    let t = p.target;
+    const dd = hyp(t.x - s.x, t.y - s.y);
+    if (dd < R) { const k = R / Math.max(dd, 0.1); t = { x: s.x + (t.x - s.x) * k, y: clamp(s.y + (t.y - s.y) * k, 0.5, PITCH.W - 0.5) }; }
+    if (d.kind === 'goalKick' && depthOf(A, t.x) < PITCH.boxD + 1.5 && Math.abs(t.y - MID) < PITCH.boxW / 2 + 1.5) t = { x: xAtDepth(A, PITCH.boxD + 1.5), y: t.y };
+    p.target = t;
+  }
+  // Nobody dawdles: each man walks or jogs so he arrives in time.
+  const left = Math.max(1, d.until - w.t);
+  for (const p of w.players) {
+    const far = hyp(p.target.x - p.x, p.target.y - p.y);
+    p.spd = clamp((far / left) * 1.15, p.jog * 0.8, p.vmax * 0.85);
+    if (p.mode !== 'keeper') p.mode = p.mode === 'mark' ? 'mark' : 'shape';
+  }
+  const tk = d.taker, ts = takerSpot(d);
+  tk.target = ts; tk.mode = 'hold'; tk.spd = Math.max(tk.spd, 4.5);
+}
+
+// Corners and wide free kicks: bodies in the box, markers on them, a few back.
+function boxSetPiece(w, d) {
+  const A = d.team, D = oppOf(A), s = Math.sign(d.spot.y - MID) || 1, P = (u, y) => ({ x: xAtDepth(A, u), y });
+  const att = w.by[A].filter((p) => p.pos !== 'GK' && p !== d.taker).sort((a, b) => at(b, 'aerial') + 0.5 * at(b, 'strength') - at(a, 'aerial') - 0.5 * at(a, 'strength'));
+  const zones = [P(103.2, MID + s * 3), P(100.6, MID + s * 0.5), P(101, MID - s * 4.5), P(94.5, MID - s * 1), P(89, MID + s * 5), P(101.5, MID + s * 17), P(86.5, MID - s * 10)];
+  const inBoxMen = [];
+  att.forEach((p, i) => {
+    if (i < zones.length) { p.target = zones[i]; p.mode = 'shape'; if (i < 5) inBoxMen.push(p); }
+    else p.target = P(i === zones.length ? 62 : 52, MID + (i % 2 ? 12 : -12));
+  });
+  const def = w.by[D].filter((p) => p.pos !== 'GK');
+  const gk = keeperOf(w, D); gk.target = P(104.4, MID - s * 0.6); gk.mode = 'keeper';
+  const used = new Set();
+  const take = (pt) => { let best = null, bd = Infinity; for (const p of def) { if (used.has(p)) continue; const dd = hyp(p.x - pt.x, p.y - pt.y); if (dd < bd) { bd = dd; best = p; } } if (best) used.add(best); return best; };
+  const zonal = [P(104, MID + s * 3.6), P(99.6, MID + s * 2.5), P(99.6, MID - s * 1.5), P(99.6, MID - s * 5)];
+  for (const z of zonal) { const p = take(z); if (p) { p.target = z; p.mode = 'shape'; } }
+  for (const a of inBoxMen) {
+    const p = take(a.target);
+    if (!p) break;
+    const g = P(PITCH.L, MID), k = 0.9 / Math.max(hyp(g.x - a.target.x, g.y - a.target.y), 1);
+    p.target = { x: a.target.x + (g.x - a.target.x) * k, y: a.target.y + (g.y - a.target.y) * k }; p.mode = 'mark'; p.marking = a.id;
+  }
+  // The rest: one on the edge of the box, the most attacking man left up for the break.
+  const rest = def.filter((p) => !used.has(p)).sort((a, b) => b.slotU - a.slotU);
+  rest.forEach((p, i) => { p.target = i === 0 ? P(55, MID + s * 8) : P(87, MID - s * (6 - i * 6)); p.mode = 'shape'; });
+}
+// A wall for a free kick within shooting range.
+function wallFor(w, d) {
+  const A = d.team, D = oppOf(A), s = d.spot, g = { x: xAtDepth(A, PITCH.L), y: MID };
+  const len = hyp(g.x - s.x, g.y - s.y) || 1, ux = (g.x - s.x) / len, uy = (g.y - s.y) / len;
+  const c = { x: s.x + ux * 9.4, y: s.y + uy * 9.4 };
+  const men = w.by[D].filter((p) => p.pos !== 'GK').sort((a, b) => hyp(a.x - c.x, a.y - c.y) - hyp(b.x - c.x, b.y - c.y)).slice(0, 3);
+  men.forEach((p, i) => { const o = (i - 1) * 0.75; p.target = { x: c.x - uy * o, y: c.y + ux * o }; p.mode = 'shape'; });
+}
+
+function takeRestart(m) {
+  const w = m.w, d = w.dead, b = w.ball, tk = d.taker, A = d.team;
+  const ts = takerSpot(d);
+  tk.x = ts.x; tk.y = ts.y; tk.vx = tk.vy = 0;
+  const rx = d.spot.x - tk.x, ry = d.spot.y - tk.y, rl = hyp(rx, ry) || 1;
+  tk.face = Math.atan2(ry, rx);
+  Object.assign(b, { state: 'held', owner: tk, team: A, x: d.spot.x, y: d.spot.y, h: 0, vx: 0, vy: 0, rel: clamp(rl, 0.4, 0.8), rv: 0, ux: rx / rl, uy: ry / rl });
+  tk.gotAt = w.t; tk.mode = 'carry'; tk.nextDecide = w.t + 0.25; tk.touchOut = false;
+  w.poss = A; w.T[A].possStart = w.t;
+  w.dead = null;
+  if (d.kind === 'penalty') return shootPenalty(w, tk);
+  w.restart = { kind: d.kind, taker: tk, noOff: ['throw', 'corner', 'goalKick'].includes(d.kind) };
+}
+
+// A penalty: struck from the spot, the keeper guesses a side.
+function shootPenalty(w, c) {
+  const team = c.team, opp = oppOf(team), gk = keeperOf(w, opp), gx = team === 'home' ? PITCH.L : 0, b = w.ball, S = w.T[team].S;
+  S.shots++; S.xg += 0.76; w.T[team].F.shot = true;
+  const pGoal = clamp(0.76 + 0.012 * (at(c, 'finishing') - 12) + 0.008 * (at(c, 'composure') - 12) - 0.012 * (at(gk, 'reflexes') - 12), 0.55, 0.9);
+  const r = w.rng(), result = r < pGoal ? 'goal' : r < pGoal + (1 - pGoal) * 0.65 ? 'saved' : 'off';
+  const side = w.rng() < 0.5 ? -1 : 1, inward = team === 'home' ? 1 : -1;
+  const to = result === 'off' ? { x: gx + inward * 1, y: MID + side * (3.9 + w.rng() * 1.2) }
+    : result === 'goal' ? { x: gx + inward * 0.8, y: MID + side * (1.6 + w.rng() * 1.6) } : { x: gx - inward * 0.4, y: MID + side * (1 + w.rng() * 1.6) };
+  gk.target = { x: gk.x, y: result === 'saved' ? to.y : MID - side * 2.2 }; gk.mode = 'dive'; gk.spd = 7; gk.until = w.t + 1;
+  c.face = Math.atan2(to.y - c.y, to.x - c.x);
+  Object.assign(b, { state: 'shot', owner: null, from: { x: b.x, y: b.y }, to, t0: w.t, T: Math.max(0.3, hyp(to.x - b.x, to.y - b.y) / 24), result, blocker: null, shooter: c, team, h: 0 });
+  w.shots.push({ team, t: w.t, x: b.x, y: b.y, xg: 0.76, header: false, result, id: c.id, cause: 'penalty', counter: false, pen: true });
+  log(w, `${tag(c)} takes the penalty`, 'shot', team);
+  w.lastShotAt = w.t; w.lastShotTeam = team;
+}
+
+// The referee's decision, as a restart.
+function handleOutcome(m) {
+  const w = m.w, o = w.outcome;
+  w.outcome = null;
+  const at0 = o.at || { x: w.ball.x, y: w.ball.y };
+  const spotIn = (p) => ({ x: clamp(p.x, 1, PITCH.L - 1), y: clamp(p.y, 1, PITCH.W - 1) });
+  const name = (t) => w.T[t].name;
+  switch (o.kind) {
+    case 'goal': {
+      m.score[o.team]++;
+      const s = [...w.shots].reverse().find((q) => q.team === o.team && q.result === 'goal');
+      const scorer = s && w.byId[s.id];
+      const text = o.og ? `Own goal, credited to ${name(o.team)}` : `GOAL! ${scorer ? scorer.name : name(o.team)}${s?.pen ? ' from the spot' : s?.header ? ' with a header' : ''}`;
+      addFeed(m, `${text}. ${name('home')} ${m.score.home}–${m.score.away} ${name('away')}`, 'goal', o.team, { xg: s?.xg });
+      clipAt(m, 'goal', o.team, { title: o.og ? 'Own goal' : `Goal: ${scorer ? scorer.name : name(o.team)}`, xg: s?.xg, result: 'goal' });
+      const ko = kickoffPositions(m.teams, oppOf(o.team));
+      beginRestart(m, 'kickoff', oppOf(o.team), { x: PITCH.L / 2, y: MID }, { ko: ko.pos, takerSlot: ko.taker, timing: 'goal' });
+      break;
+    }
+    case 'throw': beginRestart(m, 'throw', o.team, { x: clamp(at0.x, 1, PITCH.L - 1), y: at0.y < MID ? 0 : PITCH.W }); break;
+    case 'corner':
+      addFeed(m, `Corner to ${name(o.team)}`, 'corner', o.team);
+      beginRestart(m, 'corner', o.team, { x: xAtDepth(o.team, PITCH.L - 0.5), y: at0.y < MID ? 0.5 : PITCH.W - 0.5 });
+      break;
+    case 'goalKick': beginRestart(m, 'goalKick', o.team, { x: xAtDepth(o.team, PITCH.sixD), y: MID + (at0.y < MID ? -6 : 6) }); break;
+    case 'foul': case 'offside': {
+      const sp = spotIn(at0), u = depthOf(o.team, sp.x);
+      if (o.kind === 'offside') addFeed(m, `Offside: free kick to ${name(o.team)}`, 'offside', o.team);
+      else if (u > 70) addFeed(m, `Free kick to ${name(o.team)}, ${Math.round(hyp(PITCH.L - u, sp.y - MID))} m out`, 'freeKick', o.team);
+      beginRestart(m, 'freeKick', o.team, sp);
+      break;
+    }
+    case 'penaltyKick':
+      addFeed(m, `Penalty to ${name(o.team)}!`, 'penalty', o.team);
+      beginRestart(m, 'penalty', o.team, { x: xAtDepth(o.team, PITCH.L - PITCH.spotX), y: MID }, { takerId: o.taker });
+      break;
+    case 'penalty': beginRestart(m, 'goalKick', oppOf(o.team), { x: xAtDepth(oppOf(o.team), PITCH.sixD), y: MID }); break;
+    default: break;
+  }
+}
+
+// One tick of the match.
+function matchStep(m) {
+  if (m.phase !== 'play') return;
+  const w = m.w;
+  if (w.dead) deadStep(m); else engStep(w);
+  m.clock += ENG.DT * (w.dead ? w.dead.rate : 1);
+  if (w.outcome) handleOutcome(m);
+  matchWatch(m);
+  if (m.record) snapFrame(m);
+  const end = (m.half === 1 ? MATCH_HALF : 2 * MATCH_HALF) + m.stoppage[m.half - 1];
+  if (m.clock >= end) {
+    const b = w.ball, u = b.x;
+    if (w.dead || (b.state === 'held' && u > 30 && u < 75) || m.clock >= end + 25) endHalf(m);
+  }
+}
+function endHalf(m) {
+  m.phase = m.half === 1 ? 'ht' : 'ft';
+  addFeed(m, m.phase === 'ht' ? `Half-time: ${m.w.T.home.name} ${m.score.home}–${m.score.away} ${m.w.T.away.name}` : `Full time: ${m.w.T.home.name} ${m.score.home}–${m.score.away} ${m.w.T.away.name}`, 'whistle', null);
+  for (const c of m.pending) c.to = Math.min(c.to, m.frames);
+  cutClips(m, true);
+}
+function matchSecondHalf(m) {
+  if (m.phase !== 'ht') return;
+  const w = m.w, kicker = oppOf(m.firstKick), ko = kickoffPositions(m.teams, kicker);
+  m.half = 2; m.clock = MATCH_HALF; m.phase = 'play';
+  for (const t of ['home', 'away']) w.by[t].forEach((p, i) => { p.x = ko.pos[t][i][0]; p.y = ko.pos[t][i][1]; p.vx = p.vy = 0; p.stun = 0; });
+  beginRestart(m, 'kickoff', kicker, { x: PITCH.L / 2, y: MID }, { ko: ko.pos, takerSlot: ko.taker });
+  addFeed(m, 'Second half under way', 'whistle', null);
+}
+// Play a match (or the rest of it) straight through.
+function matchToEnd(m) {
+  let guard = 0;
+  while (m.phase !== 'ft' && guard++ < 200000) { if (m.phase === 'ht') matchSecondHalf(m); else matchStep(m); }
+  return m;
+}
+
+// Bookkeeping after each tick: commentary, the style numbers, clips, the other manager.
+function matchWatch(m) {
+  const w = m.w, b = w.ball, dt = ENG.DT;
+  // A shot has arrived: say what happened.
+  const inShot = b.state === 'shot';
+  if (m.prevShot && !inShot) {
+    const s = w.shots[w.shots.length - 1], p = s && w.byId[s.id];
+    if (s) {
+      m.xgLine.push({ clock: m.clock, team: s.team, xg: s.xg, goal: s.result === 'goal' });
+      if (s.result !== 'goal') {
+        const d = Math.round(hyp(xAtDepth(s.team, PITCH.L) - s.x, MID - s.y));
+        const how = { saved: 'saved', blocked: 'blocked', off: 'off target' }[s.result];
+        addFeed(m, `${s.pen ? 'Penalty' : s.xg >= 0.25 ? 'Big chance' : 'Shot'}: ${p ? p.name : w.T[s.team].name} ${s.header ? 'heads' : 'shoots'}${s.pen ? '' : ` from ${d} m`}, ${how}`, 'shot', s.team, { xg: s.xg });
+        clipAt(m, 'shot', s.team, { title: `${s.xg >= 0.25 ? 'Big chance' : 'Shot'}: ${p ? p.name : ''}`, xg: s.xg, result: s.result });
+      }
+    }
+  }
+  m.prevShot = inShot;
+  // Counter-attacks: won in your own half, into their final third within 12 s.
+  for (; m.toIdx < (w.turnovers?.length || 0); m.toIdx++) {
+    const tv = w.turnovers[m.toIdx];
+    m.counter = tv.how !== 'save' && tv.how !== 'claim' && depthOf(tv.team, tv.x) < 52 ? { team: tv.team, t: tv.t } : null;
+  }
+  if (m.counter) {
+    if (w.poss !== m.counter.team || w.t - m.counter.t > 12 || w.dead) m.counter = null;
+    else if (b.state === 'held' && depthOf(m.counter.team, b.x) > 70) { m.kpi[m.counter.team].counters++; m.counter = null; }
+  }
+  // Possession changed hands: a new set of milestones for the side with it.
+  if (w.poss !== m.lastPoss) { w.T[w.poss].F = {}; for (const p of w.players) p.freeLogged = false; m.lastPoss = w.poss; }
+  // The shape numbers, sampled twice a second while one side has it settled.
+  if (b.state === 'held' && !w.dead && w.tick % 5 === 0) {
+    const A = b.owner.team, D = oppOf(A), kA = m.kpi[A], kD = m.kpi[D];
+    const du = w.by[D].filter((p) => p.pos !== 'GK').map((p) => depthOf(D, p.x)).sort((a, c) => a - c);
+    kD.lineSum += (du[0] + du[1] + du[2] + du[3]) / 4; kD.lenSum += du[du.length - 1] - du[0]; kD.oopN++;
+    let y0 = 99, y1 = -1, hs = 0;
+    for (const p of w.by[A]) { if (p.pos === 'GK') continue; y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); hs += depthOf(A, p.x); }
+    kA.widthSum += y1 - y0; kA.heightSum += hs / 10; kA.ipN++;
+    // Where everyone stands on average, with the ball and without it, this half.
+    const H = m.avg[m.half - 1];
+    for (const p of w.players) { const q = H[p.team][p.team === A ? 'ip' : 'oop'], k = p.i * 3; q[k] += p.x; q[k + 1] += p.y; q[k + 2]++; }
+    const bq = H[A].ball; bq[0] += b.x; bq[1] += b.y; bq[2]++;
+  }
+  if (b.state === 'held' && !w.dead && depthOf(b.owner.team, b.x) > 70) m.kpi[b.owner.team].f3T += dt;
+  cutClips(m, false);
+  aiManage(m);
+}
+
+function newAvg() { const side = () => ({ ip: new Float64Array(33), oop: new Float64Array(33), ball: new Float64Array(3) }); return { home: side(), away: side() }; }
+
+// Record the tick into the ring of frames.
+function snapFrame(m) {
+  const w = m.w, f = m.ring, o = (m.frames % RING_N) * FRAME_N;
+  for (let i = 0; i < 22; i++) {
+    const p = w.players[i], k = o + i * 7;
+    f[k] = p.x; f[k + 1] = p.y; f[k + 2] = p.face; f[k + 3] = hyp(p.vx, p.vy); f[k + 4] = MODE_CODE[p.mode] || 0; f[k + 5] = p.target.x; f[k + 6] = p.target.y;
+  }
+  const b = w.ball, k = o + 154;
+  f[k] = b.x; f[k + 1] = b.y; f[k + 2] = b.h || 0; f[k + 3] = b.state === 'held' ? w.players.indexOf(b.owner) : b.state === 'dead' ? -2 : -1; f[k + 4] = m.clock;
+  m.frames++;
+}
+// A clip around a moment: twelve seconds before it, three after.
+function clipAt(m, kind, team, info) {
+  if (!m.record) return;
+  m.pending.push({ kind, team, ...info, at: m.frames, from: Math.max(0, m.frames - 120, m.frames - RING_N + 40), to: m.frames + 30, clock: m.clock, min: matchMinute(m), feedIdx: m.feed.length - 1 });
+}
+function cutClips(m, force) {
+  if (!m.pending.length) return;
+  const w = m.w;
+  m.pending = m.pending.filter((c) => {
+    if (m.frames < c.to && !force) return true;
+    const n = Math.max(1, Math.min(c.to, m.frames) - c.from), data = new Float32Array(n * FRAME_N);
+    for (let i = 0; i < n; i++) { const src = ((c.from + i) % RING_N) * FRAME_N; data.set(m.ring.subarray(src, src + FRAME_N), i * FRAME_N); }
+    // The patterns that set it up, for the explanation.
+    const t1 = w.t - (m.frames - c.at) * ENG.DT, why = w.moments.filter((q) => q.t >= t1 - 12 && q.t <= t1 + 0.5 && MOMENT_INFO[q.kind]);
+    m.clips.push({ ...c, n, data, why, atIdx: c.at - c.from });
+    return false;
+  });
+}
+
+// The other manager reacts to the score: chasing it late, or shutting up shop.
+function aiManage(m) {
+  if (m.w.dead == null || m.half < 2) return;
+  for (const team of ['home', 'away']) {
+    if (!m.ai[team]) continue;
+    const min = m.clock / 60, diff = m.score[team] - m.score[oppOf(team)];
+    const stage = min >= 80 ? 3 : min >= 70 ? 2 : min >= 60 ? 1 : 0;
+    if (stage <= m.aiStage[team]) continue;
+    m.aiStage[team] = stage;
+    const T = m.w.T[team], ins = { ...T.ins }, up = (k, order) => { const i = order.indexOf(ins[k]); if (i >= 0 && i < order.length - 1) ins[k] = order[i + 1]; };
+    let text = '';
+    if (diff < 0) {
+      up('engage', ['low', 'mid', 'high']); up('line', ['deep', 'standard', 'high']); ins.runs = 'many'; ins.tempo = 'fast';
+      if (stage >= 2) { ins.passing = ins.passing === 'short' ? 'mixed' : 'direct'; ins.crossing = 'often'; }
+      text = `${T.name} push men forward, chasing the game`;
+    } else if (diff > 0 && stage >= 2) {
+      const down = (k, order) => { const i = order.indexOf(ins[k]); if (i > 0) ins[k] = order[i - 1]; };
+      down('line', ['deep', 'standard', 'high']); down('engage', ['low', 'mid', 'high']); ins.onWin = 'hold'; ins.tempo = 'slow'; ins.runs = 'few';
+      text = `${T.name} sit deeper to protect the lead`;
+    }
+    if (text && JSON.stringify(ins) !== JSON.stringify(T.ins)) {
+      T.ins = ins; m.changes.push({ clock: m.clock, team, ins: { ...ins } });
+      addFeed(m, text, 'tactic', team);
+    }
+  }
+}
+
+// Change a side's tactic mid-match: instructions at once, roles and
+// formation for the same eleven men.
+function matchSetTactic(m, team, tactic) {
+  const w = m.w, T = w.T[team], spec = m.teams[team];
+  T.ins = { ...DEFAULT_INS, ...(tactic.instr || {}) };
+  const newForm = FORMATIONS[tactic.formation] ? tactic.formation : spec.tactic.formation;
+  const persons = w.by[team].map((p) => ({ name: p.name, pos: p.personPos || p.pos, a: p.a }));
+  const map = newForm !== spec.tactic.formation ? lineupFor(persons, newForm) : persons.map((_, i) => i);
+  const form = FORMATIONS[newForm];
+  const players = w.by[team];
+  const keep = players.map((p) => ({ x: p.x, y: p.y, vx: p.vx, vy: p.vy, face: p.face }));
+  form.forEach((slot, i) => {
+    const p = players[i], person = persons[map[i]], body = keep[map[i]];
+    const group = GROUP_OF[slot[2]], sy = team === 'home' ? slot[1] : PITCH.W - slot[1];
+    Object.assign(p, { name: person.name, a: person.a, personPos: person.pos, pos: group, label: slot[2], unit: slot[3], num: slot[4], slotU: slot[0], slotY: sy, side: sy < 30 ? -1 : sy > 38 ? 1 : 0 }, body);
+    p.tagS = p.name || p.tagS;
+    const rk = tactic.roles?.[i];
+    p.roleKey = ROLES[rk]?.groups.includes(group) ? rk : DEFAULT_ROLE[group];
+    p.R = ROLES[p.roleKey];
+    p.vmax = vmaxOf(p); p.acc = accOf(p); p.jog = jogOf(p); p.react = reactOf(p); p.lag = clamp(Math.round(p.react / ENG.DT), 1, 7);
+    p.pi = PLAYER_PRESS[tactic.pi?.[i]] ? tactic.pi[i] : 'normal';
+    p.pk = (p.R.press ?? 1) * PLAYER_PRESS[p.pi].k;
+  });
+  // The ball stays with the same man.
+  const b = w.ball;
+  if (b.state === 'held' && b.owner.team === team) { const j = keep.findIndex((q) => q.x === b.owner.x && q.y === b.owner.y); void j; }
+  m.teams = { ...m.teams, [team]: { ...spec, tactic: { ...tactic, formation: newForm } } };
+  m.changes.push({ clock: m.clock, team, tactic: JSON.parse(JSON.stringify(tactic)) });
+}
+
+// The numbers a coach reads after a game, for both sides.
+function matchStats(m) {
+  const w = m.w, out = {};
+  const pt = w.T.home.S.possT + w.T.away.S.possT || 1, f3 = m.kpi.home.f3T + m.kpi.away.f3T || 1;
+  for (const t of ['home', 'away']) {
+    const S = w.T[t].S, o = w.T[oppOf(t)].S, k = m.kpi[t];
+    const shots = w.shots.filter((s) => s.team === t);
+    out[t] = {
+      goals: m.score[t], shots: shots.length, onTarget: shots.filter((s) => s.result === 'goal' || s.result === 'saved').length, xg: shots.reduce((a, s) => a + s.xg, 0),
+      poss: (100 * S.possT) / pt, passes: S.passes, passPct: S.passes ? (100 * S.passesOk) / S.passes : 0, avgPass: S.passes ? S.passLen / S.passes : 0,
+      longPct: S.passes ? (100 * S.long) / S.passes : 0, crosses: S.crosses, corners: S.corners, fouls: S.fouls, offsides: S.offsides,
+      tackles: S.tackles, tacklesOk: S.tacklesOk, highRegains: S.highRegains, regains: S.regains, lost: S.lost, cpRegains: S.cpRegains,
+      ppda: S.ppdaAct ? o.ppdaPass / S.ppdaAct : 99, line: k.oopN ? k.lineSum / k.oopN : 0, length: k.oopN ? k.lenSum / k.oopN : 0,
+      width: k.ipN ? k.widthSum / k.ipN : 0, height: k.ipN ? k.heightSum / k.ipN : 0, tilt: (100 * k.f3T) / f3, counters: k.counters,
+      boxEntries: S.boxEntries, final3: S.final3, takeOns: S.takeOns, takeOnsOk: S.takeOnsOk, trapWins: S.trapWins || 0,
+    };
+  }
+  return out;
+}
 /* ENGINE END */
 
 /* ANALYSIS START */
@@ -4427,6 +5020,7 @@ function withForce(teams, sit) {
 
 // Starting positions for a situation, from both sides' shapes.
 function engSetup(teams, sit) {
+  if (sit.fixed) { const f = sit.fixed; return { pos: { home: f.pos.home.map((q) => [...q]), away: f.pos.away.map((q) => [...q]) }, ball: { ...f.ball }, poss: f.poss, holder: f.holder, transition: !!f.transition }; }
   const poss = sit.has, other = oppOf(poss);
   const pos = { home: [], away: [] };
   for (const t of ['home', 'away']) {
@@ -4729,62 +5323,6 @@ function insights(agg, teams, sit, unit = 'runs') {
 }
 
 /* ================================================================
-   Matchday: a game told through its key moments
-   No full 90 minutes: a match is a dozen passages per half, drawn from
-   the situations in proportion to how the two styles meet (a side that
-   presses high creates more "their build-up v our press" moments, a side
-   that sits deep invites more "break down a low block"). Each is played
-   once; the goals are real goals from the simulation.
-   ================================================================ */
-const MOMENTS_PER_HALF = 28;
-// How often each situation comes up: build-up and midfield phases are
-// common but rarely decisive, so the moments lean towards the final third
-// (where a real game's chances come from), shaped by both styles.
-function matchWeights(teams) {
-  const u = teams.home.tactic.instr, t = teams.away.tactic.instr;
-  const hi = (e) => (e === 'high' ? 0.8 : e === 'mid' ? 0.3 : 0);
-  return {
-    press: 0.4 + hi(u.engage), buildup: 0.4 + hi(t.engage), block: 0.4 + (u.engage !== 'high' ? 0.4 : 0), midfield: 0.6 + (u.passing === 'short' ? 0.3 : 0),
-    lowblock: 0.5 + (t.line === 'deep' ? 0.8 : 0) + (t.engage === 'low' ? 0.4 : 0), overload: 1 + (u.focus === 'wings' ? 0.6 : 0) + (u.width === 'wide' ? 0.3 : 0),
-    counter: 0.8 + (u.onWin === 'counter' ? 0.5 : 0) + (t.line === 'high' ? 0.4 : 0), rest: 0.8 + (t.onWin === 'counter' ? 0.5 : 0) + (u.line === 'high' ? 0.4 : 0),
-    edge: 1 + (t.final === 'shoot' ? 0.3 : 0), theirwide: 1 + (t.focus === 'wings' ? 0.6 : 0) + (t.width === 'wide' ? 0.3 : 0),
-  };
-}
-function matchPlan(teams, seed, half) {
-  const rng = rngFrom(seed * 31 + half), wts = matchWeights(teams), ids = Object.keys(wts), tot = ids.reduce((a, k) => a + wts[k], 0);
-  const out = [];
-  for (let i = 0; i < MOMENTS_PER_HALF; i++) {
-    let r = rng() * tot, id = ids[0];
-    for (const k of ids) { r -= wts[k]; if (r <= 0) { id = k; break; } }
-    out.push({ sit: SITUATIONS.findIndex((q) => q.id === id), minute: 0, seed: (seed * 1000 + half * 100 + i) >>> 0 });
-  }
-  const mins = out.map(() => Math.floor(rng() * 44) + 1 + (half === 2 ? 45 : 0)).sort((a, b) => a - b);
-  out.forEach((m, i) => { m.minute = mins[i]; });
-  return out;
-}
-// One line for the match feed: what happened in a passage, from its events.
-function summarize(w, sit) {
-  const o = w.outcome, shots = w.shots, name = (t) => w.T[t].name;
-  const last = shots[shots.length - 1];
-  if (o.kind === 'goal') {
-    const s = shots.filter((q) => q.team === o.team && q.result === 'goal').pop();
-    const p = s && w.players.find((q) => q.id === s.id);
-    if (o.og) return { text: `Own goal! ${name(o.team)} score`, kind: 'goal', team: o.team };
-    return { text: `GOAL! ${p ? `${tag(p)} ${p.name}` : name(o.team)} ${s?.pen ? 'scores from the spot' : s?.header ? 'heads in' : 'scores'}${s && !s.pen ? ` (xG ${s.xg.toFixed(2)})` : ''}`, kind: 'goal', team: o.team };
-  }
-  if (last) {
-    const p = w.players.find((q) => q.id === last.id);
-    const how = { saved: 'saved', blocked: 'blocked', off: 'wide', goal: 'in' }[last.result] || last.result;
-    return { text: `${name(last.team)} chance: ${p ? `${tag(p)} ${p.name}` : ''} ${last.header ? 'heads' : 'shoots'}, ${how} (xG ${last.xg.toFixed(2)})`, kind: 'shot', team: last.team };
-  }
-  const regain = (w.turnovers || [])[0];
-  if (o.kind === 'offside') return { text: `${name(oppOf(o.team))} caught offside`, kind: '', team: o.team };
-  if (o.kind === 'foul') return { text: `Free kick to ${name(o.team)}`, kind: '', team: o.team };
-  if (regain) return { text: `${name(regain.team)} win it back${depthOf(regain.team, regain.x) > PITCH.L / 2 ? ' high up' : ''}`, kind: '', team: regain.team };
-  return { text: `${name(sit.has)} keep the ball but can’t get through`, kind: '', team: sit.has };
-}
-
-/* ================================================================
    Lessons: one principle each, set in a situation, with a goal to reach
    by changing the tactic. Goals are measured over the same 100 runs as
    the lab, so a lesson passes on football reasons, not a lucky run.
@@ -4906,15 +5444,6 @@ function leagueRounds() {
   }
   return rounds;
 }
-function simMatch(teams, seed) {
-  const g = { home: 0, away: 0 }, xg = { home: 0, away: 0 };
-  for (const half of [1, 2]) for (const m of matchPlan(teams, seed, half)) {
-    const sit = SITUATIONS[m.sit], t = withForce(teams, sit), w = engRun(runInput(t, engSetup(t, sit), m.seed, sit.maxT));
-    if (w.outcome.kind === 'goal') g[w.outcome.team]++;
-    xg.home += w.T.home.S.xg; xg.away += w.T.away.S.xg;
-  }
-  return { g, xg };
-}
 function leagueTable(results) {
   const row = Object.fromEntries(LEAGUE_IDS.map((id) => [id, { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }]));
   for (const r of results.flat()) {
@@ -4923,12 +5452,6 @@ function leagueTable(results) {
     if (r.ga > r.gb) { a.w++; b.l++; a.pts += 3; } else if (r.ga < r.gb) { b.w++; a.l++; b.pts += 3; } else { a.d++; b.d++; a.pts++; b.pts++; }
   }
   return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.ga) - (x.gf - x.ga) || y.gf - x.gf || x.id.localeCompare(y.id));
-}
-// Scouting: which situations this fixture will throw up most, and how your
-// current tactic copes in each against them compared with an average side.
-function scoutPlan(teams) {
-  const wts = matchWeights(teams), tot = Object.values(wts).reduce((a, b) => a + b, 0);
-  return Object.entries(wts).map(([id, v]) => ({ sit: SITUATIONS.findIndex((q) => q.id === id), share: v / tot })).sort((a, b) => b.share - a.share).slice(0, 4);
 }
 /* ANALYSIS END */
 
@@ -5275,8 +5798,18 @@ function actionBox() {
   return [x0, y0, x1, y1];
 }
 function updateCamGoal() {
+  if (appMode === 'tactics' && camPref.auto) {
+    if (!camDirty) return;
+    camDirty = false;
+    const pts = [...state.players.filter((p) => p.team === tac.team), state.ball];
+    let x0 = Math.min(...pts.map((p) => p.x)) - 7, x1 = Math.max(...pts.map((p) => p.x)) + 7, y0 = -2, y1 = PITCH.W + 2;
+    if (x1 - x0 < 60) { const c = (x0 + x1) / 2; x0 = c - 30; x1 = c + 30; }
+    frameBox(x0, y0, x1, y1);
+    return;
+  }
   const coaching = appMode === 'lab' || (appMode === 'lessons' && lesson.id) || appMode === 'match';
   if (!coaching || !camPref.auto) { frameAll(); return; }
+  if (liveBoard() && !replay.w) { if (live.avgView) frameAll(); else frameBox(...liveBox()); return; }
   if (!replay.w && !camDirty) return;
   camDirty = false;
   frameBox(...actionBox());
@@ -5670,17 +6203,18 @@ function insightsHTML() {
   return `<section><h2>Assistant</h2>${proofHTML()}${notes ? `<h3 class="sub">What the numbers say</h3>${notes}` : ''}</section>`;
 }
 
-const GUIDE_KEY = 'tacticsLab.guide.v1';
-let guideSeen = !!store.get(GUIDE_KEY, false);
+// First-visit guides, one per screen, each dismissed on its own.
+const GUIDE_KEY = 'tacticsLab.guides.v2';
+const guides = (() => { const g = store.get(GUIDE_KEY, {}); return g && typeof g === 'object' ? g : {}; })();
+const guideOK = (k) => `<button class="btn small" data-guide="${k}">Got it</button>`;
 function guideHTML() {
-  if (guideSeen) return '';
-  return `<section><div class="card gold guide"><h3>How this works</h3>
-    <ol class="small"><li><b>Pick a moment</b> of a match below. Both teams line up the way their tactics say they would; the camera frames the action (Zoom/Full switches).</li>
-    <li><b>Tap one of your players</b> to give him a job here: a run, a set pass, a carry, pressing or marking a named man. Drag a player to move him.</li>
-    <li><b>Watch</b> one run (½× for slow motion). Players accelerate, turn and react like players; Jobs labels what each one is doing, and your plan shows in gold.</li>
-    <li><b>Test 100×</b> plays it a hundred times with small differences each time, says how often your plan came off, and the assistant tests alternatives and only recommends what held up.</li>
-    <li><b>Lessons</b> teach one principle each. <b>Match</b> is a season: scout the next opponent, prepare here, play it.</li></ol>
-    <button class="btn small" id="guide-ok">Got it</button></div></section>`;
+  if (guides.train) return '';
+  return `<section><div class="card gold guide"><h3>Training</h3>
+    <ol class="small"><li><b>Pick a phase of play</b> below, or bring one from a match with <b>Train</b> on any replay. Both sides line up the way their tactics say.</li>
+    <li><b>Tap one of your players</b> to give him a job: a run, a set pass, a carry, press or mark a named man. Drag players to move them.</li>
+    <li><b>Watch</b> one run (½× for slow motion). Jobs shows what each player is doing; your plan is in gold.</li>
+    <li><b>Test 100×</b> plays it a hundred times and says how often it worked. The assistant tries alternatives and only recommends changes that held up.</li></ol>
+    ${guideOK('train')}</div></section>`;
 }
 function renderLabSide() {
   const sit = labSit(), src = club, teams = labTeams();
@@ -5714,29 +6248,53 @@ function renderLabSide() {
    instructions in three phases. The pitch shows the shape the engine
    will actually play, with and without the ball.
    ================================================================ */
-const tac = { team: 'home', phase: 'ip', help: null, ghost: null, shapeBall: null };
+// Five phases of a game, each a picture of where the engine puts your side
+// when the ball is there: the shape it will actually play.
+const TAC_PHASES = {
+  build: { label: 'Build-up', ours: true, at: [14, 22], carrier: ['CB', 'GK'], text: 'Your centre-back has it near your box. Arrows: the run each role makes. Dotted rings: the men who stay behind the ball.' },
+  attack: { label: 'Attack', ours: true, at: [66, 26], carrier: ['CM', 'AM', 'DM'], text: 'Your midfielder has it in their half. Arrows: the run each role makes; the dashed yellow line is their last line, the one to get in behind.' },
+  press: { label: 'Press', ours: false, at: [12, 24], carrier: ['CB', 'GK'], text: 'Their centre-back has it near their box. Gold: where your press starts and the side you show them onto; orange arrows are the men who go and press.' },
+  block: { label: 'Mid-block', ours: false, at: [42, 30], carrier: ['CB', 'DM'], text: 'They have it around halfway. The blue block is your shape from back line to front line: keep it short and the gaps between the lines small.' },
+  low: { label: 'Low block', ours: false, at: [74, 20], carrier: ['W', 'AM', 'CM'], text: 'They have it out wide near your box. Watch who covers the cross, who marks in the box and who stays up for the counter.' },
+};
+const tac = { team: 'home', phase: 'build', help: null, ghost: null, shapeBall: null, tween: 0 };
+try { const p = store.get('tacticsLab.tacPhase', 'build'); if (TAC_PHASES[p]) tac.phase = p; } catch { /* default */ }
 function showShape() {
   clearReplay(false);
-  const teams = teamsOf(club), sh = engShape(teams, tac.team);
+  const teams = teamsOf(club), P = TAC_PHASES[tac.phase] || TAC_PHASES.build, team = tac.team, opp = oppOf(team);
+  const poss = P.ours ? team : opp;
+  const setup = engSetup(teams, { has: poss, at: P.at, carrier: P.carrier });
+  // Where everyone stood before, so the change can be watched rather than jumped.
+  const before = new Map(state.players.map((p) => [p.id, [p.x, p.y]]));
+  const sameForms = state.formations?.home === teams.home.tactic.formation && state.formations?.away === teams.away.tactic.formation;
   setupMatch(teams.home.tactic.formation, teams.away.tactic.formation);
-  const tm = teams[tac.team];
-  const cur = tac.phase === 'ip' ? sh.ip : sh.oop, other = tac.phase === 'ip' ? sh.oop : sh.ip;
-  state.players.filter((p) => p.team === tac.team).forEach((p, i) => {
-    Object.assign(p, { x: cur[i][0], y: cur[i][1], base: { x: cur[i][0], y: cur[i][1] }, name: tm.lineup[i]?.name || '', tag: ROLES[tm.tactic.roles[i]]?.short || p.role });
-  });
-  tac.ghost = other;
-  tac.opp = tac.phase === 'ip' ? sh.ipOpp : sh.oopOpp;
-  // The opponents, faint, where they stand in this phase.
-  const ot = teams[oppOf(tac.team)];
-  state.players.filter((p) => p.team !== tac.team).forEach((p, i) => {
-    Object.assign(p, { x: tac.opp[i][0], y: tac.opp[i][1], faded: true, tag: ROLES[ot.tactic.roles[i]]?.short || p.role });
-  });
+  for (const p of state.players) {
+    const i = slotOf(p), tm = teams[p.team], q = setup.pos[p.team][i];
+    Object.assign(p, { x: q[0], y: q[1], base: { x: q[0], y: q[1] }, name: tm.lineup[i]?.name || '', tag: ROLES[tm.tactic.roles[i]]?.short || p.role, faded: p.team !== team, face: null, vx: 0, vy: 0, mode: null });
+  }
+  tac.ghost = null;
+  tac.opp = setup.pos[opp];
   showOnly = null;
-  tac.tactic = tm.tactic;
-  state.ball = { ...(tac.phase === 'ip' ? sh.ipBall : sh.oopBall) };
-  state.possession = tac.phase === 'ip' ? tac.team : oppOf(tac.team);
-  const selSlot = tac.sel;
-  state.selected = selSlot != null ? `${tac.team}-${selSlot}` : null;
+  tac.tactic = teams[team].tactic;
+  const ballTo = { ...setup.ball }, ballFrom = { ...state.ball };
+  state.ball = { ...ballTo };
+  state.possession = poss;
+  state.selected = tac.sel != null ? `${team}-${tac.sel}` : null;
+  camDirty = true;
+  // Glide everyone from where they were to where this phase puts them.
+  if (sameForms && before.size === state.players.length && appMode === 'tactics') {
+    const to = new Map(state.players.map((p) => [p.id, [p.x, p.y]])), t0 = performance.now(), dur = 650, id = ++tac.tween;
+    const ease = (k) => 1 - Math.pow(1 - k, 3);
+    const step = (now) => {
+      if (tac.tween !== id || appMode !== 'tactics') return;
+      const k = ease(clamp((now - t0) / dur, 0, 1));
+      for (const p of state.players) { const a = before.get(p.id), b = to.get(p.id); if (a && b) { p.x = a[0] + (b[0] - a[0]) * k; p.y = a[1] + (b[1] - a[1]) * k; } }
+      state.ball.x = ballFrom.x + (ballTo.x - ballFrom.x) * k; state.ball.y = ballFrom.y + (ballTo.y - ballFrom.y) * k;
+      requestRender();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
   requestRender();
 }
 const tacSide = () => sideOf(club, tac.team);
@@ -5780,7 +6338,7 @@ function renderTacticsSide() {
       ${st ? `<details class="card"><summary><b>Strengths and risks</b></summary><p class="small"><b>Strengths.</b> ${esc(st.strengths)}</p><p class="small"><b>Risks.</b> ${esc(st.risks)}</p></details>` : ''}
     </section>
     <section><h2>Formation</h2><select id="tac-formation" class="full">${Object.keys(FORMATIONS).map((f) => `<option ${f === t.formation ? 'selected' : ''}>${f}</option>`).join('')}</select>
-      <p class="muted small">${tac.phase === 'ip' ? 'With the ball: arrows show the run each role makes, and dotted rings the players who stay behind the ball.' : 'Without it: the shaded band is where you press them into, the dashed line is where your press starts, orange arrows are the players who go and press, and white rings are the ones told to stay in shape.'} Faint rings show the other phase. Tap a player to change his role or pressing.</p></section>
+      <p class="muted small"><b>${esc(TAC_PHASES[tac.phase].label)}.</b> ${esc(TAC_PHASES[tac.phase].text)} Switch phase on the bar under the pitch; change anything and watch the shape move. Tap a player to change his role or pressing.</p></section>
     ${player}
     <section><h2>Team instructions</h2><div class="tabs inline">${phaseTabs}</div>${help}${instrRowsHTML(club, tac.team, keys)}</section>
     <section><h2>Squad</h2><div class="squad">${form.map((slot, i) => { const pl = side.squad[lu[i]]; return `<button data-slot="${i}" aria-pressed="${tac.sel === i}"><span class="n">${slot[4]}</span><span>${esc(pl.name)} <span class="r">${esc(ROLES[t.roles[i]].name)}</span></span><span class="r">${esc(slot[2])}</span></button>`; }).join('')}</div>
@@ -5862,96 +6420,412 @@ function renderLessonsSide() {
 }
 
 /* ================================================================
-   Match: your tactic against an opponent, told through its key moments
-   (a dozen passages a half), with a half-time report and the chance to
-   change things before the second half.
+   Match: a whole game, played live. The same engine as the training
+   ground runs ninety minutes in front of you, at 1× to 8× or in
+   highlights, and you can change the tactic from the touchline at any
+   moment and watch the team adjust. Every shot is cut into a clip you can
+   replay with the patterns that set it up, and any of them can be taken
+   to the training ground to work on that exact moment. The scorecard
+   compares what you asked the team to do with what it actually did.
    ================================================================ */
-const match = { phase: 'pre', seed: 0, items: [], shown: 0, score: { home: 0, away: 0 }, halves: [null, null], timer: 0, current: -1, minute: 0, league: false, oppId: null };
-// League fixtures are played against the real opponent; a friendly uses
-// whatever version of them you set up in Tactics.
-const matchOpp = () => (match.league ? opponentTeam(match.oppId) : club.them);
-const matchTeams = () => ({ home: engTeam(club.us), away: engTeam(matchOpp()) });
+const SPEEDS = [1, 2, 4, 8, 'hl'];
+const live = { m: null, phase: 'pre', league: false, oppId: null, speed: 2, paused: false, acc: 0, last: 0, tab: 'feed', lines: true,
+  feedSeen: 0, clipsSeen: 0, clip: null, watching: false, adjust: null, others: null, hlQueue: [], report: null, raf: 0 };
+const LIVE_KEY = 'tacticsLab.live.v1';
+try { const s = store.get(LIVE_KEY, null); if (s && SPEEDS.includes(s.speed)) live.speed = s.speed; if (s && typeof s.lines === 'boolean') live.lines = s.lines; } catch { /* defaults */ }
+const saveLive = () => store.set(LIVE_KEY, { speed: live.speed, lines: live.lines });
+
+const matchOpp = () => (live.league ? opponentTeam(live.oppId) : club.them);
+const liveTeams = () => ({ home: engTeam(club.us), away: engTeam(matchOpp()) });
+const liveOn = () => live.m && (live.phase === 'play' || live.phase === 'ht' || live.phase === 'ft');
+
 function kickOff(league = false) {
-  match.league = league && !seasonOver();
-  match.oppId = match.league ? nextFixture().opp : club.oppId;
-  match.seed = (Math.random() * 1e6) >>> 0;
-  match.items = []; match.shown = 0; match.score = { home: 0, away: 0 }; match.halves = [null, null]; match.current = -1; match.minute = 0;
-  playHalf(1);
-}
-function playHalf(half) {
-  const teams = matchTeams(), agg = newAgg(), plan = matchPlan(teams, match.seed, half);
-  for (const m of plan) {
-    const sit = SITUATIONS[m.sit], t = withForce(teams, sit), setup = engSetup(t, sit);
-    const w = engRun(runInput(t, setup, m.seed, sit.maxT));
-    addRun(agg, w);
-    match.items.push({ ...m, half, teams: t, setup, sum: summarize(w, sit), goal: w.outcome.kind === 'goal' ? w.outcome.team : null, xg: { home: w.T.home.S.xg, away: w.T.away.S.xg } });
-  }
-  match.halves[half - 1] = { agg, teams };
-  match.phase = half === 1 ? 'first' : 'second';
-  revealNext();
-}
-function revealNext() {
-  clearTimeout(match.timer);
-  const pending = match.items.slice(match.shown);
-  if (!pending.length) {
-    match.phase = match.phase === 'first' ? 'ht' : 'ft';
-    ticker(match.phase === 'ht' ? `Half-time: ${match.score.home}–${match.score.away}` : `Full time: ${match.score.home}–${match.score.away}`, match.phase === 'ft' && match.score.home > match.score.away ? 'win' : '', 3000);
-    if (match.phase === 'ft' && match.score.home > match.score.away) flash('win');
-    if (match.phase === 'ft' && match.league) recordLeague();
-    renderSide(); syncBars();
-    return;
-  }
-  const it = pending[0];
-  match.shown++; match.minute = it.minute;
-  if (it.goal) {
-    match.score[it.goal]++;
-    flash(it.goal === 'home' ? 'goal' : 'against');
-  }
-  ticker(`${it.minute}’ ${it.sum.text}`, it.goal ? 'goal' : it.sum.kind === 'shot' ? 'shot' : '', 1600);
-  renderScorebug(); renderSide(); syncBars();
-  match.timer = setTimeout(revealNext, it.goal ? 1500 : it.sum.kind === 'shot' ? 800 : 450);
-}
-function skipReveal() { clearTimeout(match.timer); while (match.shown < match.items.length) { const it = match.items[match.shown++]; if (it.goal) match.score[it.goal]++; match.minute = it.minute; } revealNext(); }
-function watchItem(i) {
-  const it = match.items[i];
-  if (!it) return;
+  if (live.raf) cancelAnimationFrame(live.raf);
   clearReplay(false);
-  match.current = i;
-  placeSetup(it.teams, it.setup);
-  replay.start = saveStart();
-  startReplay(engRun(runInput(it.teams, it.setup, it.seed, SITUATIONS[it.sit].maxT), true));
+  live.league = league && !seasonOver();
+  live.oppId = live.league ? nextFixture().opp : club.oppId;
+  const teams = liveTeams();
+  live.m = matchCreate({ teams, seed: (Math.random() * 1e9) >>> 0, ai: { home: false, away: true } });
+  Object.assign(live, { phase: 'play', avgView: null, paused: false, acc: 0, last: performance.now(), feedSeen: 0, clipsSeen: 0, clip: null, watching: false, adjust: null, others: null, hlQueue: [], report: null, tab: 'feed' });
+  placeLiveBoard();
+  camDirty = true; camSnap = true;
+  ticker(`${teams.home.name} v ${teams.away.name}`, '', 1800);
+  renderSide(); syncBars();
+  live.raf = requestAnimationFrame(liveLoop);
 }
-function renderScorebug() {
-  const el = $('#scorebug');
-  el.hidden = appMode !== 'match' || match.phase === 'pre';
-  $('#stage').classList.toggle('in-match', !el.hidden);
-  if (el.hidden) return;
-  setHTML(el, `<span class="dot home"></span><span class="sc">${match.score.home}–${match.score.away}</span><span class="dot away"></span><span class="min">${match.phase === 'ft' ? 'FT' : match.phase === 'ht' ? 'HT' : `${match.minute}’`}</span>`);
+// The board's 22 discs, labelled for the two line-ups as they stand.
+function placeLiveBoard() {
+  const m = live.m, teams = m.teams;
+  setupMatch(teams.home.tactic.formation, teams.away.tactic.formation);
+  state.showAway = true;
+  for (const p of state.players) {
+    const q = m.w.byId[p.id];
+    p.name = q?.name || ''; p.tag = ROLES[q?.roleKey]?.short || p.role; p.num = q?.num ?? p.num;
+  }
+  applyLiveFrame(m.frames - 1, m.frames - 1, 0);
 }
-function matchStats(which) {
-  const aggs = match.halves.filter(Boolean).slice(0, which === 'ht' ? 1 : 2).map((h) => h.agg);
-  const sum = (t, k) => aggs.reduce((a, g) => a + g.S[t][k], 0);
-  const poss = sum('home', 'possT') / Math.max(sum('home', 'possT') + sum('away', 'possT'), 1);
-  const row = (label, h, a) => `<tr><td>${h}</td><td>${esc(label)}</td><td>${a}</td></tr>`;
-  const pct = (t) => `${Math.round((100 * sum(t, 'passesOk')) / Math.max(sum(t, 'passes'), 1))}%`;
-  return `<table class="mstats">${row('Possession', `${Math.round(poss * 100)}%`, `${Math.round((1 - poss) * 100)}%`)}${row('Shots', sum('home', 'shots'), sum('away', 'shots'))}
-    ${row('On target', sum('home', 'onTarget'), sum('away', 'onTarget'))}${row('xG', sum('home', 'xg').toFixed(2), sum('away', 'xg').toFixed(2))}
-    ${row('Pass completion', pct('home'), pct('away'))}${row('Won it back high', sum('home', 'highRegains'), sum('away', 'highRegains'))}</table>`;
+// A recorded frame (or a blend of two) onto the board.
+function applyPacked(fa, oa, fb, ob, k) {
+  const ang = (a, b) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * k; };
+  for (let i = 0; i < 22; i++) {
+    const p = state.players[i], a = oa + i * 7, b = ob + i * 7;
+    if (!p) continue;
+    p.x = fa[a] + (fb[b] - fa[a]) * k; p.y = fa[a + 1] + (fb[b + 1] - fa[a + 1]) * k;
+    p.face = ang(fa[a + 2], fb[b + 2]);
+    const sp = fa[a + 3] + (fb[b + 3] - fa[a + 3]) * k;
+    p.vx = Math.cos(p.face) * sp; p.vy = Math.sin(p.face) * sp;
+    p.mode = MODE_LIST[fa[a + 4]] || 'shape';
+  }
+  const a = oa + 154, b = ob + 154;
+  state.ball.x = fa[a] + (fb[b] - fa[a]) * k; state.ball.y = fa[a + 1] + (fb[b + 1] - fa[a + 1]) * k;
+  state.ballH = fa[a + 2] + (fb[b + 2] - fa[a + 2]) * k; state.ballLift = clamp(state.ballH / 6, 0, 1);
+  const own = fa[a + 3];
+  state.liveOwner = own >= 0 ? state.players[own]?.id : null;
 }
-function matchReport(half) {
-  const h = match.halves[half - 1];
-  if (!h) return '';
-  const qs = insights(h.agg, h.teams, { id: 'match' }, 'moments').filter((q) => q.tone === 'bad' || q.tone === 'good').slice(0, 3);
-  if (!qs.length) return '<p class="muted small">Nothing stood out: the game is even on the patterns that matter.</p>';
-  return qs.map((q) => `<div class="card ${q.tone}"><b>${esc(q.title)}</b><p class="small">${esc(q.text)}</p>${q.fixes.length ? `<p class="small muted">Worth trying: ${q.fixes.map((f) => esc(f.label)).join('; ')}.</p>` : ''}</div>`).join('');
+function applyLiveFrame(fA, fB, k) {
+  const m = live.m;
+  if (!m || m.frames < 1) return;
+  const oA = ((Math.max(0, fA)) % RING_N) * FRAME_N, oB = ((Math.max(0, fB)) % RING_N) * FRAME_N;
+  applyPacked(m.ring, oA, m.ring, oB, k);
 }
 
-/* ================================================================
-   Season: seven fixtures against the league, a scouting report built
-   from simulations before each one, and a table where every other
-   result is played by the same engine.
-   ================================================================ */
-const SEASON_KEY = 'tacticsLab.season.v1';
+// The live loop: simulate as far as the chosen speed says, draw the latest
+// frame, report what happened.
+function liveLoop(now) {
+  live.raf = 0;
+  const m = live.m;
+  if (!m || appMode !== 'match') return;
+  const dt = Math.min(0.25, Math.max(0, (now - live.last) / 1000));
+  live.last = now;
+  if (live.phase === 'play' && !live.paused && !replay.w) {
+    if (live.speed === 'hl') {
+      // Highlights: run on until a shot has been cut into a clip, then show it.
+      let n = 0;
+      while (m.phase === 'play' && live.clipsSeen >= m.clips.length && n++ < 900) matchStep(m);
+      if (live.clipsSeen < m.clips.length) { live.clipsSeen = m.clips.length; liveFeed(); playClip(m.clips.length - 1, true); return; }
+      applyLiveFrame(m.frames - 1, m.frames - 1, 0);
+    } else {
+      live.acc += dt * live.speed;
+      let n = 0;
+      while (live.acc >= ENG.DT && m.phase === 'play' && n++ < 200) { matchStep(m); live.acc -= ENG.DT; }
+      applyLiveFrame(m.frames - 2, m.frames - 1, clamp(live.acc / ENG.DT, 0, 1));
+      live.clipsSeen = m.clips.length;
+    }
+    liveFeed();
+    if (m.phase !== 'play') halfOver();
+    renderScorebug();
+    requestRender();
+  }
+  if (live.phase === 'play' && !replay.w) live.raf = requestAnimationFrame(liveLoop);
+}
+// New commentary: the caption over the pitch, a flash for a goal.
+function liveFeed() {
+  const m = live.m;
+  if (live.feedSeen >= m.feed.length) return;
+  const items = m.feed.slice(live.feedSeen);
+  live.feedSeen = m.feed.length;
+  for (const f of items) {
+    if (f.kind === 'goal') { flash(f.team === 'home' ? 'goal' : 'against'); burst(state.ball.x, state.ball.y, f.team === 'home' ? colors.home : colors.away, true); }
+  }
+  const f = items.filter((q) => q.kind !== 'whistle' || q.text !== 'Kick-off').pop();
+  if (f) ticker(`${f.min} ${f.text}`, f.kind === 'goal' ? 'goal' : f.kind === 'shot' || f.kind === 'penalty' ? 'shot' : f.kind === 'tactic' ? 'focus' : '', f.kind === 'goal' ? 3200 : 2200);
+  renderSide();
+}
+function setSpeed(v) { live.speed = v; live.acc = 0; saveLive(); syncBars(); if (liveOn() && live.phase === 'play' && !live.raf && !replay.w) { live.last = performance.now(); live.raf = requestAnimationFrame(liveLoop); } }
+function togglePause() {
+  if (live.phase !== 'play') return;
+  live.paused = !live.paused;
+  live.last = performance.now();
+  if (!live.paused && !live.raf && !replay.w) live.raf = requestAnimationFrame(liveLoop);
+  ticker(live.paused ? 'Paused' : 'Play on', '', 900);
+  syncBars(); renderSide();
+}
+// Skip to the end of the half: the rest is played at once.
+function skipHalf() {
+  const m = live.m;
+  if (!m || m.phase !== 'play') return;
+  if (live.watching) { live.watching = false; live.clip = null; clearReplay(false); }
+  if (live.raf) { cancelAnimationFrame(live.raf); live.raf = 0; }
+  let guard = 0;
+  while (m.phase === 'play' && guard++ < 60000) matchStep(m);
+  live.clipsSeen = m.clips.length;
+  applyLiveFrame(m.frames - 1, m.frames - 1, 0);
+  liveFeed();
+  halfOver();
+}
+// At the breaks: where everyone stood on average this half, either with your
+// side on the ball or with theirs. The shape you asked for, as it came out.
+function showAverage(view) {
+  const m = live.m, H = m.avg[m.half - 1], A = view === 'ip' ? 'home' : 'away';
+  live.avgView = view;
+  for (const p of state.players) {
+    const i = slotOf(p), q = H[p.team][p.team === A ? 'ip' : 'oop'], n = q[i * 3 + 2];
+    if (n) { p.x = q[i * 3] / n; p.y = q[i * 3 + 1] / n; }
+    p.face = null; p.vx = p.vy = 0; p.mode = null;
+  }
+  const bq = H[A].ball;
+  if (bq[2]) state.ball = { x: bq[0] / bq[2], y: bq[1] / bq[2] };
+  state.ballH = 0; state.ballLift = 0; state.liveOwner = null;
+  camDirty = true; renderSide(); requestRender();
+}
+function halfOver() {
+  const m = live.m;
+  live.phase = m.phase;
+  if (live.raf) { cancelAnimationFrame(live.raf); live.raf = 0; }
+  showAverage('ip');
+  live.report = matchStats(m);
+  if (m.phase === 'ht') { ticker(`Half-time: ${m.score.home}–${m.score.away}`, '', 3000); live.tab = 'report'; }
+  if (m.phase === 'ft') {
+    const won = m.score.home > m.score.away;
+    ticker(`Full time: ${m.score.home}–${m.score.away}`, won ? 'win' : '', 3500);
+    if (won) flash('win');
+    live.tab = 'report';
+    if (live.league) recordLeague();
+  }
+  renderScorebug(); renderSide(); syncBars(); requestRender();
+}
+function secondHalf() {
+  const m = live.m;
+  if (!m || m.phase !== 'ht') return;
+  clearReplay(false);
+  matchSecondHalf(m);
+  live.phase = 'play'; live.paused = false; live.tab = 'feed'; live.last = performance.now(); live.avgView = null;
+  placeLiveBoard();
+  renderSide(); syncBars();
+  live.raf = requestAnimationFrame(liveLoop);
+}
+// From the touchline: the change goes in at once, and the pitch shows it.
+function touchline(key, value) {
+  setInstr(club, 'home', key, value);
+  if (live.m && live.phase !== 'ft') {
+    matchSetTactic(live.m, 'home', club.us.tactic);
+    addFeed(live.m, `${club.us.name}: ${INSTR[key].label.toLowerCase()} now ${INSTR[key].opts.find((o) => o[0] === value)[1].toLowerCase()}`, 'tactic', 'home');
+    live.adjust = { key, until: performance.now() + 6000 };
+    live.lines = true;
+    liveFeed();
+  }
+  renderSide(); requestRender();
+}
+
+// The board belongs to the live match (rather than the pre-match picture).
+const liveBoard = () => appMode === 'match' && !!live.m && live.phase !== 'pre';
+// Before kick-off: both sides lined up for the next game, so you can see the
+// shape you are sending out before it starts.
+function placePreview() {
+  const nf = nextFixture(), opp = live.phase === 'pre' && nf ? opponentTeam(nf.opp) : club.them;
+  const teams = { home: engTeam(club.us), away: engTeam(opp) }, ko = kickoffPositions(teams, 'home');
+  setupMatch(teams.home.tactic.formation, teams.away.tactic.formation);
+  state.showAway = true;
+  for (const p of state.players) {
+    const i = slotOf(p), t = teams[p.team], q = ko.pos[p.team][i];
+    Object.assign(p, { x: q[0], y: q[1], face: null, vx: 0, vy: 0, mode: null, tag: ROLES[t.tactic.roles[i]]?.short || p.role, name: t.lineup[i]?.name || '' });
+  }
+  state.ball = { x: PITCH.L / 2, y: MID }; state.ballH = 0; state.ballLift = 0;
+  camDirty = true;
+}
+// Off to another screen mid-match: the game waits for you.
+function leaveMatch() {
+  if (live.raf) { cancelAnimationFrame(live.raf); live.raf = 0; }
+  if (live.watching) { live.watching = false; live.clip = null; }
+  if (live.phase === 'play' && !live.paused) { live.paused = true; live.autoPaused = true; }
+}
+function enterMatch() {
+  if (!live.m || live.phase === 'pre') { placePreview(); return; }
+  // Changes made on the Team screen go on as you come back.
+  const key = JSON.stringify(club.us.tactic);
+  if (live.phase !== 'ft' && key !== JSON.stringify(live.m.teams.home.tactic)) {
+    matchSetTactic(live.m, 'home', club.us.tactic);
+    addFeed(live.m, `${club.us.name} make changes: ${styleLabel(club.us.tactic)} in a ${club.us.tactic.formation}`, 'tactic', 'home');
+    live.feedSeen = live.m.feed.length;
+    toast('Your changes are on: watch the shape');
+    live.adjust = { key: 'all', until: performance.now() + 6000 };
+  }
+  placeLiveBoard();
+  if (live.autoPaused) { live.paused = false; live.autoPaused = false; }
+  if (live.phase === 'play' && !live.raf) { live.last = performance.now(); live.raf = requestAnimationFrame(liveLoop); }
+}
+function matchDone() {
+  clearReplay(false);
+  Object.assign(live, { watching: false, clip: null, phase: 'pre', coachNote: '', tab: 'feed' });
+  placePreview();
+  renderScorebug(); renderSide(); syncBars(); requestRender();
+}
+// The camera on a live match: the zone the ball is in and the space ahead of
+// it, so a press in their third shows their third and a counter shows the
+// grass it is running into. Faster playback pulls back to keep up.
+function liveBox() {
+  const w = live.m.w, b = state.ball, dir = w.poss === 'home' ? 1 : -1;
+  const half = live.speed === 'hl' || live.speed >= 8 ? 42 : live.speed >= 4 ? 36 : 30;
+  const cx = clamp(b.x + dir * (w.dead ? 3 : 8), half - 4, PITCH.L - half + 4);
+  const hy = half * 0.7, y0 = clamp(b.y - hy, -3, PITCH.W + 3 - 2 * hy);
+  return [cx - half, y0, cx + half, y0 + 2 * hy];
+}
+// A label pinned to a point on the pitch but kept on screen: it is drawn in
+// screen space, measured, and nudged inside the canvas (below the scorebug).
+function pitchLabel(x, y, text, color, strong = false) {
+  const { a, b, c, d, e, f, dpr } = view;
+  let sx = a * x + c * y + e, sy = b * x + d * y + f;
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const fz = strong ? 14 : 12;
+  ctx.font = `700 ${fz}px ${FONT_COND}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const w = ctx.measureText(text).width, top = $('#scorebug').hidden ? 8 : 60;
+  sx = clamp(sx, w / 2 + 8, view.cssW - w / 2 - 8); sy = clamp(sy, top + fz, view.cssH - fz);
+  ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,0.72)'; ctx.lineJoin = 'round'; ctx.strokeText(text, sx, sy);
+  ctx.fillStyle = color; ctx.fillText(text, sx, sy);
+  ctx.restore();
+}
+// A side's lines as they stand: the back line and how high it is, the length
+// of the block, where the press starts (and the side it shows them onto)
+// while the other side has it, and their last line while this side has it.
+// `hot` lights up the line a change has just moved.
+function drawTeamLines(team, ins, poss, hot) {
+  const opp = oppOf(team), u = (p) => depthOf(team, p.x);
+  const ours = state.players.filter((p) => p.team === team && p.role !== 'GK');
+  if (ours.length < 6) return;
+  const us = ours.map(u).sort((a, b) => a - b), n = us.length;
+  const backU = (us[0] + us[1] + us[2] + us[3]) / 4, frontU = (us[n - 1] + us[n - 2] + us[n - 3]) / 3;
+  const back = xAtDepth(team, backU), front = xAtDepth(team, frontU);
+  const ys = ours.map((p) => p.y), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const [hr, hg, hb] = team === 'home' ? colors.homeRGB : colors.awayRGB;
+  const lit = (k) => hot === k || hot === 'all';
+  ctx.save();
+  ctx.fillStyle = `rgba(${hr},${hg},${hb},${lit('compact') ? 0.16 : 0.08})`;
+  ctx.fillRect(Math.min(back, front), y0, Math.abs(front - back), y1 - y0);
+  ctx.strokeStyle = colors[team]; ctx.lineWidth = lineWidthM(lit('line') ? 0.5 : 0.28); ctx.setLineDash([1.2, 0.7]);
+  line(back, y0 - 2, back, y1 + 2);
+  ctx.globalAlpha = 0.65; ctx.lineWidth = lineWidthM(0.16); line(front, y0 - 1, front, y1 + 1);
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+  pitchLabel(back, y0 - 3.2, `back line ${Math.round(backU)} m`, '#fff', lit('line'));
+  pitchLabel((back + front) / 2, y1 + 3.2, `${Math.round(frontU - backU)} m back to front`, '#fff', lit('compact'));
+  if (poss === opp) {
+    const zone = PRESS_ZONE[ins.engage], gold = colors.select;
+    if (zone < PITCH.L) {
+      const x = xAtDepth(team, zone);
+      ctx.strokeStyle = gold; ctx.globalAlpha = lit('engage') ? 0.95 : 0.55; ctx.lineWidth = lineWidthM(lit('engage') ? 0.4 : 0.2); ctx.setLineDash([0.9, 0.9]);
+      line(x, 0, x, PITCH.W); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      pitchLabel(x, 2.5, 'press starts here', gold, lit('engage'));
+    } else pitchLabel(state.ball.x, 2.5, 'pressing all over the pitch', gold, lit('engage'));
+    if (ins.pressTo && ins.pressTo !== 'none' && appMode !== 'tactics') {
+      const xa = xAtDepth(team, Math.min(zone, PITCH.L)), xb = xAtDepth(team, 0);
+      ctx.fillStyle = `rgba(245,184,61,${lit('pressTo') ? 0.16 : 0.08})`;
+      for (let y = 0; y < PITCH.W; y += 1) if (inTrapZone(ins.pressTo, opp, { y: y + 0.5 })) ctx.fillRect(Math.min(xa, xb), y, Math.abs(xa - xb), 1);
+    }
+  } else if (poss === team) {
+    const theirs = state.players.filter((p) => p.team === opp && p.role !== 'GK');
+    if (theirs.length) {
+      const lastU = Math.max(...theirs.map(u)), last = xAtDepth(team, lastU);
+      ctx.strokeStyle = colors.offside; ctx.globalAlpha = 0.7; ctx.lineWidth = lineWidthM(0.18); ctx.setLineDash([0.6, 0.6]);
+      line(last, 0, last, PITCH.W); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      pitchLabel(last, PITCH.W - 2.5, 'their last line', colors.offside);
+    }
+  }
+  ctx.restore();
+}
+function drawLiveLines() {
+  const m = live.m, now = performance.now();
+  const hot = live.adjust && now < live.adjust.until ? live.adjust.key : null;
+  const avg = live.avgView && live.phase !== 'play', poss = avg ? (live.avgView === 'ip' ? 'home' : 'away') : m.w.poss, dead = avg ? null : m.w.dead;
+  if (dead?.kind === 'kickoff') return;
+  drawTeamLines('home', m.w.T.home.ins, dead ? null : poss, hot);
+}
+
+/* ---------------- Clips: replay a shot with the patterns behind it ---------------- */
+// A clip as a passage the replay player understands.
+function clipPassage(c) {
+  const m = live.m, w0 = m.w, n = c.n, frames = [];
+  for (let i = 0; i < n; i++) {
+    const o = i * FRAME_N, p = [];
+    for (let j = 0; j < 22; j++) { const a = o + j * 7; p.push([c.data[a], c.data[a + 1], c.data[a + 4], c.data[a + 5], c.data[a + 6], c.data[a + 2], c.data[a + 3]]); }
+    const b = o + 154;
+    frames.push({ p, b: [c.data[b], c.data[b + 1], c.data[b + 2], c.data[b + 3] >= 0 ? c.data[b + 3] : -1] });
+  }
+  // Times inside the clip: the shot (or goal) is at frame atIdx.
+  const tShot = w0.t - (m.frames - c.at) * ENG.DT, t0 = tShot - c.atIdx * ENG.DT;
+  const rel = (t) => Math.round((t - t0) * 10) / 10;
+  const evs = w0.events.filter((e) => e.t >= t0 && e.t <= t0 + n * ENG.DT && !['milestone'].includes(e.kind)).map((e) => ({ ...e, t: rel(e.t) }));
+  const moments = c.why.map((q) => ({ ...q, t: rel(q.t) })).filter((q) => q.t >= 0);
+  const shots = w0.shots.filter((s) => s.t >= t0 && s.t <= t0 + n * ENG.DT).map((s) => ({ ...s, t: rel(s.t) }));
+  return { frames, players: w0.players.map((q) => ({ id: q.id, team: q.team })), events: evs, moments, shots, t: (n - 1) * ENG.DT,
+    T: { home: { name: w0.T.home.name }, away: { name: w0.T.away.name } }, outcome: { kind: c.result === 'goal' ? 'goal' : 'clip', team: c.team }, clip: c };
+}
+function playClip(i, fromHighlights = false) {
+  const m = live.m, c = m?.clips[i];
+  if (!c) return;
+  if (live.raf) { cancelAnimationFrame(live.raf); live.raf = 0; }
+  live.clip = c; live.watching = true; live.fromHL = fromHighlights;
+  const w = clipPassage(c);
+  replay.start = null;
+  startReplay(w, () => { if (live.fromHL && live.phase === 'play' && live.speed === 'hl') setTimeout(() => { if (live.watching && replay.w && !replay.playing) closeClip(); }, 1200); });
+  ticker(`${c.min} ${c.title}`, c.result === 'goal' ? 'goal' : 'focus', 2200);
+  renderSide(); syncBars();
+}
+function closeClip() {
+  if (!live.watching) return;
+  live.watching = false; live.clip = null;
+  clearReplay(false);
+  applyLiveFrame(live.m.frames - 1, live.m.frames - 1, 0);
+  for (const p of state.players) { p.vx = p.vy = 0; }
+  renderSide(); syncBars(); requestRender();
+  if (live.phase === 'play') { live.last = performance.now(); live.raf = requestAnimationFrame(liveLoop); }
+}
+// Take a moment of the match to the training ground: the same 22 men where
+// they stood a few seconds before the shot, both tactics as they were.
+function trainMoment(c) {
+  const m = live.m, back = Math.max(0, c.atIdx - 50), o = back * FRAME_N, d = c.data;
+  const pos = { home: [], away: [] };
+  for (let j = 0; j < 22; j++) pos[j < 11 ? 'home' : 'away'].push([d[o + j * 7], d[o + j * 7 + 1]]);
+  const ball = { x: d[o + 154], y: d[o + 155] }, own = d[o + 157];
+  let poss, holder;
+  if (own >= 0) { poss = own < 11 ? 'home' : 'away'; holder = own % 11; }
+  else {
+    poss = c.team;
+    const list = pos[poss].map((q, i) => ({ i, dd: hyp(q[0] - ball.x, q[1] - ball.y) })).filter((q) => q.i !== 0).sort((a, b) => a.dd - b.dd);
+    holder = list[0].i; ball.x = pos[poss][holder][0]; ball.y = pos[poss][holder][1];
+  }
+  const ours = poss === 'home';
+  const sit = { id: 'moment', maxT: 15, name: `From the match: ${c.min} ${c.title}`, has: poss, at: [depthOf(poss, ball.x), 34], carrier: [],
+    brief: `${ours ? 'Your' : 'Their'} move that led to ${c.result === 'goal' ? 'a goal' : 'a chance'} (${c.min}), from five seconds before the shot. Change the tactic or give players jobs, then test it 100 times.`,
+    primary: ours ? { key: 'shotFor', label: 'Got a shot away', good: 'up' } : { key: 'shotAg', label: 'They got a shot away', good: 'down' },
+    levers: ours ? { home: ['passing', 'tempo', 'width', 'runs', 'final', 'crossing'], away: ['line', 'press', 'compact'] } : { home: ['line', 'press', 'compact', 'marking', 'engage'], away: ['passing', 'tempo', 'runs'] },
+    fixed: { pos, ball, poss, holder, transition: false } };
+  const k = SITUATIONS.findIndex((q) => q.id === 'moment');
+  if (k >= 0) SITUATIONS[k] = sit; else SITUATIONS.push(sit);
+  if (!live.league) { /* friendly: the opponent as set up */ } else { club.oppId = live.oppId; club.them = opponentTeam(live.oppId); saveClub(); }
+  closeClip();
+  labSitSaved = SITUATIONS.indexOf(sit); lab.saved = null;
+  setMode('lab');
+  toast('This moment is now in Training: test changes on it');
+}
+
+/* ---------------- What you asked for, against what happened ---------------- */
+// Each instruction a coach sets has a number that shows whether the team
+// did it. A tick means it happened; a cross explains what got in the way.
+function scorecard(m, team = 'home') {
+  const S = matchStats(m)[team], ins = m.w.T[team].ins, rows = [];
+  const add = (asked, label, value, ok, why) => rows.push({ asked, label, value, ok, why });
+  const r0 = (x) => Math.round(x);
+  if (ins.engage === 'high') add('Press high', 'Won it back in their half', `${S.highRegains} times`, S.highRegains >= 14, S.highRegains >= 14 ? 'The press worked: plenty won high.' : 'They got past the first line too often. Try more pressing intensity or a press trap.');
+  else if (ins.engage === 'low') add('Sit off them', 'Passes allowed per defensive action (PPDA)', S.ppda.toFixed(1), S.ppda >= 16, S.ppda >= 16 ? 'You let them have it in their half, as planned.' : 'You still engaged high quite often.');
+  else add('Mid-block', 'Passes allowed per defensive action (PPDA)', S.ppda.toFixed(1), S.ppda >= 8 && S.ppda <= 18, 'A mid-block lets them have the ball at the back, then engages from halfway.');
+  if (ins.press === 'more') add('Press harder', 'PPDA (lower = more pressing)', S.ppda.toFixed(1), S.ppda <= 9, S.ppda <= 9 ? 'Intense: they rarely had time.' : 'The pressure wasn’t intense enough to unsettle them.');
+  add(`${INSTR.line.opts.find((o) => o[0] === ins.line)[1]} line`, 'Average height of your back line', `${r0(S.line)} m`, ins.line === 'high' ? S.line >= 38 : ins.line === 'deep' ? S.line <= 26 : S.line > 26 && S.line < 38,
+    ins.line === 'high' ? 'High enough to squeeze the pitch; watch the space behind.' : ins.line === 'deep' ? 'Deep: little space behind, more in front.' : 'A standard line.');
+  add('Compactness', 'Distance from your last man to your first', `${r0(S.length)} m`, S.length <= 38, S.length <= 38 ? 'Short distances between your lines.' : 'Stretched: space between your lines for them to play in.');
+  if (ins.passing === 'short') add('Short passing', 'Average pass length', `${r0(S.avgPass)} m`, S.avgPass <= 17, S.avgPass <= 17 ? 'Short and patient, as asked.' : 'Still going longer than asked: under pressure the safe ball was often a long one.');
+  if (ins.passing === 'direct' || ins.buildUp === 'long') add('Go direct', 'Long passes', `${r0(S.longPct)}%`, S.longPct >= 18, S.longPct >= 18 ? 'Direct, as asked.' : 'Few long balls went on: the forwards weren’t there to aim at.');
+  add('Keep the ball', 'Pass completion', `${r0(S.passPct)}%`, S.passPct >= (ins.passing === 'direct' ? 75 : 83), ins.passing === 'direct' ? 'Direct play gives some away; that is the price of it.' : 'How safely you kept it.');
+  if (ins.width === 'wide') add('Play wide', 'Your width with the ball', `${r0(S.width)} m`, S.width >= 54, S.width >= 54 ? 'Stretched them across the pitch.' : 'Not as wide as asked.');
+  if (ins.width === 'narrow') add('Play narrow', 'Your width with the ball', `${r0(S.width)} m`, S.width <= 50, 'Narrow: short distances, crowded flanks.');
+  if (ins.onLoss === 'counterpress') add('Counter-press', 'Won it back within 5 s of losing it', `${S.lost ? r0((100 * S.cpRegains) / S.lost) : 0}%`, S.lost && S.cpRegains / S.lost >= 0.22, S.lost && S.cpRegains / S.lost >= 0.22 ? 'Lost it, won it straight back.' : 'The first pass out of your counter-press usually found a man.');
+  if (ins.onWin === 'counter') add('Counter', 'Breaks into their final third within 12 s', `${S.counters}`, S.counters >= 6, S.counters >= 6 ? 'Quick breaks when you won it.' : 'Few quick breaks: there was nobody running beyond.');
+  if (ins.crossing === 'often') add('Cross often', 'Crosses', `${S.crosses}`, S.crosses >= 18, 'Balls into the box.');
+  if (ins.focus === 'wings' || ins.focus === 'middle') add(`Attack through the ${ins.focus === 'wings' ? 'wings' : 'middle'}`, 'Time with the ball in their final third', `${r0(S.tilt)}% of it`, S.tilt >= 50, S.tilt >= 50 ? 'You lived in their final third.' : 'They kept you out of their final third more than you kept them out of yours.');
+  return rows;
+}
+
+/* ---------------- Season ---------------- */
+const SEASON_KEY = 'tacticsLab.season.v2';
 const ROUNDS = leagueRounds();
 function freshSeason() { return { seed: (Math.random() * 1e6) >>> 0, results: [], year: 1 }; }
 function loadSeason() {
@@ -5969,109 +6843,179 @@ function nextFixture() {
   return pair ? { opp: pair[0] === 'us' ? pair[1] : pair[0], round: season.results.length + 1 } : null;
 }
 const clubName = (id) => (id === 'us' ? club.us.name : OPPONENTS.find((o) => o.id === id)?.name || id);
-const oppSide = (id) => { const o = opponentTeam(id); return engTeam(o); };
-// After your match: play the round's other fixtures and move on.
-function recordLeague() {
-  const r = season.results.length, pairs = ROUNDS[r], out = [];
-  pairs.forEach(([a, b], k) => {
-    if (a === 'us' || b === 'us') {
-      const usHome = a === 'us';
-      out.push({ a, b, ga: usHome ? match.score.home : match.score.away, gb: usHome ? match.score.away : match.score.home });
-    } else {
-      const m = simMatch({ home: oppSide(a), away: oppSide(b) }, (season.seed * 7 + r * 10 + k) >>> 0);
-      out.push({ a, b, ga: m.g.home, gb: m.g.away });
-    }
-  });
+const oppSide = (id) => engTeam(opponentTeam(id));
+// A match nobody watches, played in slices so the page stays responsive.
+async function quickMatch(teams, seed) {
+  const m = matchCreate({ teams, seed, record: false, ai: { home: true, away: true } });
+  while (m.phase !== 'ft') {
+    for (let i = 0; i < 3000 && m.phase !== 'ft'; i++) { if (m.phase === 'ht') matchSecondHalf(m); else matchStep(m); }
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return m.score;
+}
+// After your league match: the round's other games are played, then the table moves on.
+async function recordLeague() {
+  const r = season.results.length, pairs = ROUNDS[r], out = [], m = live.m;
+  live.others = { done: 0, total: pairs.length - 1 };
+  renderSide();
+  for (const [k, [a, b]] of pairs.entries()) {
+    if (a === 'us' || b === 'us') { const usHome = a === 'us'; out.push({ a, b, ga: usHome ? m.score.home : m.score.away, gb: usHome ? m.score.away : m.score.home }); continue; }
+    const g = await quickMatch({ home: oppSide(a), away: oppSide(b) }, (season.seed * 7 + r * 10 + k) >>> 0);
+    out.push({ a, b, ga: g.home, gb: g.away });
+    live.others.done++; renderSide();
+  }
   season.results.push(out);
-  match.league = false;
+  live.league = false; live.others = null;
   saveSeason();
-  scout.key = null;
   const nf = nextFixture();
   if (nf) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); }
-}
-// Scouting: the situations this fixture will throw up most, and how your
-// current tactic does in each against them compared with an average side.
-const scout = { key: null, busy: false, rows: null };
-async function runScout() {
-  const nf = nextFixture();
-  if (!nf || scout.busy) return;
-  const key = JSON.stringify([nf.opp, club.us.tactic, season.results.length]);
-  if (scout.key === key) return;
-  scout.busy = true; scout.key = key; scout.rows = null; renderSide();
-  const vs = { home: engTeam(club.us), away: oppSide(nf.opp) }, avg = { home: engTeam(club.us), away: oppSide('ashby') };
-  const rows = [];
-  for (const q of scoutPlan(vs)) {
-    await new Promise((res) => setTimeout(res, 0));
-    if (scout.key !== key) return;
-    const sit = SITUATIONS[q.sit], t1 = withForce(vs, sit), t0 = withForce(avg, sit);
-    const m1 = metricsOf(engBatch(t1, engSetup(t1, sit), 60, TEST_SEED, 0, undefined, sit.maxT))[sit.primary.key];
-    const m0 = metricsOf(engBatch(t0, engSetup(t0, sit), 60, TEST_SEED, 0, undefined, sit.maxT))[sit.primary.key];
-    const good = (m1 - m0) * (sit.primary.good === 'up' ? 1 : -1);
-    rows.push({ ...q, m1, m0, good });
-    scout.rows = rows; renderSide();
-  }
-  scout.busy = false;
   renderSide();
 }
-function prepareFor(sitIdx) {
-  const nf = nextFixture();
-  if (nf && club.oppId !== nf.opp) { club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); }
-  labSitSaved = sitIdx; lab.saved = null;
-  setMode('lab');
-  toast(`Preparing for ${clubName(nf?.opp || club.oppId)}: ${SITUATIONS[sitIdx].name}`);
-}
-function tableHTML(compact = false) {
+function tableHTML() {
   const t = leagueTable(season.results);
-  return `<table class="ltable"><thead><tr><th></th><th class="l">Club</th><th>P</th>${compact ? '' : '<th>W</th><th>D</th><th>L</th>'}<th>GD</th><th>Pts</th></tr></thead><tbody>${t.map((r, i) =>
-    `<tr class="${r.id === 'us' ? 'us' : ''}"><td>${i + 1}</td><td class="l">${esc(clubName(r.id))}</td><td>${r.p}</td>${compact ? '' : `<td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>`}<td>${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td><td><b>${r.pts}</b></td></tr>`).join('')}</tbody></table>`;
+  return `<table class="ltable"><thead><tr><th></th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead><tbody>${t.map((r, i) =>
+    `<tr class="${r.id === 'us' ? 'us' : ''}"><td>${i + 1}</td><td class="l">${esc(clubName(r.id))}</td><td>${r.p}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td><td>${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td><td><b>${r.pts}</b></td></tr>`).join('')}</tbody></table>`;
 }
 function roundHTML(i) {
   const round = season.results[i];
   if (!round) return '';
   return `<div class="results">${round.map((r) => `<div class="${r.a === 'us' || r.b === 'us' ? 'us' : ''}"><span>${esc(clubName(r.a))}</span><b>${r.ga}–${r.gb}</b><span>${esc(clubName(r.b))}</span></div>`).join('')}</div>`;
 }
-function scoutHTML(nf) {
-  const o = OPPONENTS.find((q) => q.id === nf.opp), st = STYLES[o.style], ins = opponentTeam(nf.opp).tactic.instr;
-  const says = [`${INSTR.engage.label.toLowerCase()} ${INSTR.engage.opts.find((x) => x[0] === ins.engage)[1].toLowerCase()}`, `${INSTR.passing.label.toLowerCase()} ${INSTR.passing.opts.find((x) => x[0] === ins.passing)[1].toLowerCase()}`, `${INSTR.line.label.toLowerCase()} ${INSTR.line.opts.find((x) => x[0] === ins.line)[1].toLowerCase()}`];
-  const rows = scout.rows || [];
-  const worst = rows.length === 4 && !scout.busy ? rows.reduce((a, b) => (b.good < a.good ? b : a)) : null;
-  const best = rows.length === 4 && !scout.busy ? rows.reduce((a, b) => (b.good > a.good ? b : a)) : null;
-  const line = (r) => {
-    const sit = SITUATIONS[r.sit], d = Math.round(r.good);
-    const tag = r === worst && d < -8 ? '<span class="tag bad">Their threat</span>' : r === best && d > 8 ? '<span class="tag good">Your chance</span>' : '';
-    return `<div class="srow"><div class="grow"><b>${esc(sit.name)}</b> ${tag}<p class="small muted">${Math.round(r.share * 100)}% of the passages. ${esc(sit.primary.label)}: ${Math.round(r.m1)}% against them, ${Math.round(r.m0)}% against an average side.</p></div><button class="btn small" data-prepare="${r.sit}">Prepare</button></div>`;
-  };
-  return `<div class="card red"><h3>Scouting: ${esc(o.name)}</h3><p class="small">${esc(o.blurb)} ${esc(st.name)}: ${esc(says.join(', '))}.</p>
-    ${rows.map(line).join('')}${scout.busy ? `<p class="small muted">Simulating your tactic against them… ${rows.length} of 4 situations.</p>` : ''}
-    ${worst && Math.round(worst.good) < -8 ? `<p class="small"><b>Advice:</b> fix “${esc(SITUATIONS[worst.sit].name)}” first. Prepare opens it in the Lab against them, and the assistant will test changes for you.</p>` : ''}</div>`;
+// Scouting: who they are, what they do, and where to prepare.
+const SCOUT_SIT = { gegenpress: 'buildup', tikitaka: 'press', vertical: 'block', control: 'press', wingplay: 'theirwide', counter: 'rest', routeone: 'edge', parkbus: 'lowblock', balanced: 'midfield' };
+const SCOUT_WHY = { gegenpress: 'They press high and hard: can you play out, or go over them?', tikitaka: 'They want the ball from the back: can your press win it high?', vertical: 'Quick combinations through the middle: keep them in front of you.',
+  control: 'Patient build-up: press it, or let them have it?', wingplay: 'Wingers and crosses: stop the cross or win what comes in.', counter: 'They break fast: is your rest defence ready?', routeone: 'Long balls and second balls: deal with them around your box.',
+  parkbus: 'Ten men behind the ball: you will need a way through a low block.', balanced: 'No obvious weakness: control midfield.' };
+function scoutHTML(id) {
+  const o = OPPONENTS.find((q) => q.id === id), st = STYLES[o.style], t = opponentTeam(id).tactic, ins = t.instr;
+  const word = (k) => INSTR[k].opts.find((x) => x[0] === ins[k])[1].toLowerCase();
+  const sit = SITUATIONS.findIndex((q) => q.id === SCOUT_SIT[o.style]);
+  return `<div class="card red"><h3>Scouting: ${esc(o.name)}</h3><p class="small">${esc(o.blurb)}</p>
+    <p class="small muted">${esc(st.name)} in a ${esc(t.formation)}: press ${esc(word('engage'))}, ${esc(word('line'))} line, ${esc(word('passing'))} passing, ${esc(word('tempo'))} tempo.</p>
+    <div class="srow"><div class="grow"><b>Prepare: ${esc(SITUATIONS[sit].name)}</b><p class="small muted">${esc(SCOUT_WHY[o.style])}</p></div><button class="btn small" data-prepare="${sit}" data-opp="${id}">Train it</button></div></div>`;
+}
+function prepareFor(sitIdx, oppId) {
+  if (oppId && club.oppId !== oppId) { club.oppId = oppId; club.them = opponentTeam(oppId); saveClub(); pruneOrders('away'); }
+  labSitSaved = sitIdx; lab.saved = null;
+  setMode('lab');
+  toast(`Training: ${SITUATIONS[sitIdx].name} against ${clubName(club.oppId)}`);
+}
+
+/* ---------------- The match panel ---------------- */
+function statRowsHTML(S) {
+  const h = S.home, a = S.away, row = (label, x, y, fmt = (v) => v) => `<tr><td>${fmt(x)}</td><td>${esc(label)}</td><td>${fmt(y)}</td></tr>`;
+  const pct = (v) => `${Math.round(v)}%`, f2 = (v) => v.toFixed(2), f1 = (v) => (v >= 40 ? '–' : v.toFixed(1));
+  return `<table class="mstats">${row('Possession', h.poss, a.poss, pct)}${row('Shots', h.shots, a.shots)}${row('On target', h.onTarget, a.onTarget)}${row('xG (chance quality)', h.xg, a.xg, f2)}
+    ${row('Passes', h.passes, a.passes)}${row('Pass completion', h.passPct, a.passPct, pct)}${row('Corners', h.corners, a.corners)}${row('Fouls', h.fouls, a.fouls)}${row('Offsides', h.offsides, a.offsides)}
+    ${row('Won it back in their half', h.highRegains, a.highRegains)}${row('PPDA (lower = more pressing)', h.ppda, a.ppda, f1)}${row('Back line height', h.line, a.line, (v) => `${Math.round(v)} m`)}${row('Final-third share', h.tilt, a.tilt, pct)}</table>`;
+}
+// The run of play: each side's chances through the match, as a strip.
+function momentumHTML(m) {
+  const end = m.half === 2 || m.phase === 'ft' ? 2 * MATCH_HALF + m.stoppage[1] : MATCH_HALF + m.stoppage[0];
+  const W = 300, H = 56, x = (c) => (W * Math.min(c, end)) / end;
+  let cum = { home: 0, away: 0 }, ph = `M0 ${H / 2}`, pa = `M0 ${H / 2}`;
+  for (const s of m.xgLine) { cum[s.team] += s.xg; const X = x(s.clock).toFixed(1); ph += ` L${X} ${(H / 2 - Math.min(H / 2 - 2, cum.home * 9)).toFixed(1)}`; pa += ` L${X} ${(H / 2 + Math.min(H / 2 - 2, cum.away * 9)).toFixed(1)}`; }
+  const now = x(m.clock).toFixed(1);
+  ph += ` L${now} ${(H / 2 - Math.min(H / 2 - 2, cum.home * 9)).toFixed(1)}`; pa += ` L${now} ${(H / 2 + Math.min(H / 2 - 2, cum.away * 9)).toFixed(1)}`;
+  const goals = m.xgLine.filter((s) => s.goal).map((s) => `<circle cx="${x(s.clock).toFixed(1)}" cy="${s.team === 'home' ? 6 : H - 6}" r="4" fill="var(--armband)"/>`).join('');
+  return `<svg class="momentum" viewBox="0 0 ${W} ${H}" role="img" aria-label="Expected goals through the match: ${club.us.name} ${cum.home.toFixed(2)}, opponent ${cum.away.toFixed(2)}">
+    <line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="var(--line-soft)"/><line x1="${x(MATCH_HALF)}" y1="0" x2="${x(MATCH_HALF)}" y2="${H}" stroke="var(--line-soft)" stroke-dasharray="3 3"/>
+    <path d="${ph}" fill="none" stroke="var(--home)" stroke-width="2.5"/><path d="${pa}" fill="none" stroke="var(--away)" stroke-width="2.5"/>${goals}</svg>
+    <p class="legend"><span style="color:var(--home)">━</span> your chances (xG) building up <span style="color:var(--away)">━</span> theirs <span style="color:var(--armband)">●</span> goal</p>`;
+}
+function scorecardHTML(m) {
+  const rows = scorecard(m);
+  const ok = rows.filter((r) => r.ok).length;
+  return `<p class="small">You asked for ${rows.length} things; the team did <b>${ok}</b>.</p><div class="sc-list">${rows.map((r) =>
+    `<div class="sc-row ${r.ok ? 'ok' : 'no'}"><span class="mk">${r.ok ? '✓' : '✗'}</span><span class="grow"><b>${esc(r.asked)}</b><span class="small muted"> · ${esc(r.label)}</span><br><span class="small">${esc(r.why)}</span></span><span class="v">${esc(r.value)}</span></div>`).join('')}</div>`;
+}
+function clipsHTML(m) {
+  if (!m.clips.length) return '<p class="muted small">Every shot is kept as a clip: replay it to see the move and the patterns behind it.</p>';
+  return `<div class="feed">${m.clips.map((c, i) => ({ c, i })).reverse().map(({ c, i }) => `<div class="it ${c.result === 'goal' ? 'goal' : ''} ${c.team}" ${live.clip === c ? 'aria-current="true"' : ''}>
+    <span class="m">${esc(c.min)}</span><span class="txt">${esc(c.title)}<span class="sit">${c.team === 'home' ? esc(club.us.name) : esc(m.w.T.away.name)} · ${esc({ goal: 'goal', saved: 'saved', blocked: 'blocked', off: 'off target' }[c.result] || c.result)}${c.xg != null ? ` · xG ${c.xg.toFixed(2)}` : ''}</span></span>
+    <span class="row"><button class="btn small" data-clip="${i}">Replay</button><button class="btn small" data-train="${i}" title="Open this moment in Training">Train</button></span></div>`).join('')}</div>`;
+}
+function feedHTML(m) {
+  const items = m.feed.slice().reverse().slice(0, 80);
+  return `<ol class="log commentary">${items.map((f) => `<li class="${f.team || ''} ${f.kind}"><span class="t">${esc(f.min)}</span><span>${esc(f.text)}</span></li>`).join('')}</ol>`;
+}
+function touchlineHTML() {
+  const groups = [['Without the ball', ['engage', 'line', 'press', 'compact']], ['With the ball', ['passing', 'tempo', 'width', 'runs']], ['Transitions', ['onLoss', 'onWin']]];
+  return `<p class="small muted">Changes go in at once: watch the shape move. They are saved to your tactic.</p>${groups.map(([t, keys]) => `<h3 class="sub">${t}</h3>${instrRowsHTML(club, 'home', keys).replace(/data-instr=/g, 'data-touch=')}`).join('')}
+    <p class="small"><button class="link" data-goto="tactics">Full tactics</button> (roles and formation; changes apply at half-time or now).</p>`;
+}
+function matchGuideHTML() {
+  if (guides.match) return '';
+  return `<section><div class="card gold guide"><h3>How this works</h3>
+    <ol class="small"><li><b>Set how you want to play</b> in <b>Team</b>: a style, a formation, a role for every player.</li>
+    <li><b>Watch the match.</b> Change things from the touchline at any time and see the team adjust. The scorecard tells you whether the team did what you asked.</li>
+    <li><b>Replay any shot</b> to see the move and the patterns behind it, then <b>Train</b> that exact moment: test changes on it a hundred times.</li>
+    <li><b>Lessons</b> teach one principle each. <b>Board</b> is a free tactics board.</li></ol>
+    ${guideOK('match')}</div></section>`;
 }
 function renderMatchSide() {
-  const us = club.us, them = matchOpp();
-  if (match.phase === 'pre') {
+  const m = live.m;
+  if (!m || live.phase === 'pre') {
     const nf = nextFixture();
-    if (nf) setTimeout(runScout, 0);
     const last = season.results.length ? `<section><h2>Round ${season.results.length} results</h2>${roundHTML(season.results.length - 1)}</section>` : '';
     const league = nf
-      ? `<section><h2>Season ${season.year} · Round ${nf.round} of ${ROUNDS.length}</h2><div class="card blue"><div class="row"><b class="grow">${esc(us.name)} v ${esc(clubName(nf.opp))}</b><button class="link" data-goto="tactics">Tactics</button></div>
-          <p class="small muted">${esc(teamLine(engTeam(us)))}</p></div>${scoutHTML(nf)}<button class="btn primary" id="match-kick">Kick off</button></section>`
-      : `<section><h2>Season ${season.year} complete</h2>${(() => { const pos = leagueTable(season.results).findIndex((r) => r.id === 'us') + 1; return `<div class="card ${pos <= 3 ? 'good' : pos >= 6 ? 'bad' : ''}"><h3>${pos === 1 ? 'Champions!' : `You finished ${pos}${['st', 'nd', 'rd'][pos - 1] || 'th'}`}</h3><p class="small">${pos === 1 ? 'Top of the league on tactics alone: every side had the same kind of players you did or better.' : 'Every result was played by the engine, so the table reflects how your ideas held up against each style. Go again with what you learned.'}</p></div>`; })()}
+      ? `<section><h2>Season ${season.year} · Round ${nf.round} of ${ROUNDS.length}</h2>
+          <div class="fixture"><span class="tm">${esc(club.us.name)}</span><span class="v">v</span><span class="tm r">${esc(clubName(nf.opp))}</span></div>
+          <div class="card blue"><div class="row"><span class="grow small">${esc(teamLine(engTeam(club.us)))}</span><button class="link" data-goto="tactics">Team</button></div></div>
+          ${scoutHTML(nf.opp)}<button class="btn primary" id="match-kick">Kick off</button></section>`
+      : `<section><h2>Season ${season.year} complete</h2>${(() => { const pos = leagueTable(season.results).findIndex((r) => r.id === 'us') + 1; return `<div class="card ${pos <= 3 ? 'good' : pos >= 6 ? 'bad' : ''}"><h3>${pos === 1 ? 'Champions!' : `You finished ${pos}${['st', 'nd', 'rd'][pos - 1] || 'th'}`}</h3><p class="small">Every result was played by the engine, so the table shows how your ideas held up against each style.</p></div>`; })()}
           <button class="btn primary" id="season-new">Start season ${season.year + 1}</button></section>`;
-    return `${league}${last}<section><h2>Table</h2>${tableHTML()}</section>
+    return `${matchGuideHTML()}${league}${last}<section><h2>Table</h2>${tableHTML()}</section>
       <section><details class="card"><summary><b>Friendly</b> <span class="muted small">any opponent, doesn’t count</span></summary>
         <label class="irow"><span>Opponent</span><select class="full" id="opp-select">${OPPONENTS.map((o) => `<option value="${o.id}" ${o.id === club.oppId ? 'selected' : ''}>${esc(o.name)} (${esc(STYLES[o.style].name)})</option>`).join('')}</select></label>
-        <p class="muted small">${esc(OPPONENTS.find((o) => o.id === club.oppId)?.blurb || '')} A friendly uses them as you set them up in Tactics.</p><button class="btn" id="match-friendly">Play friendly</button></details></section>
-      <p class="muted small">Matches are played as their key moments, ${MOMENTS_PER_HALF} passages a half, chosen by how the two styles meet. Every goal is one the simulation scored.</p>`;
+        <p class="muted small">${esc(OPPONENTS.find((o) => o.id === club.oppId)?.blurb || '')} A friendly uses them as set up under Team → Opponent.</p><button class="btn" id="match-friendly">Play friendly</button></details></section>`;
   }
-  const feed = match.items.slice(0, match.shown).map((it, i) => ({ it, i })).reverse().map(({ it, i }) =>
-    `<div class="it ${it.goal ? 'goal' : ''}" ${match.current === i ? 'aria-current="true"' : ''}><span class="m">${it.minute}’</span><span class="txt">${esc(it.sum.text)}<span class="sit">${esc(SITUATIONS[it.sit].name)}</span></span><button class="btn small" data-watch-item="${i}">Watch</button></div>`).join('');
-  const ht = match.phase === 'ht', ft = match.phase === 'ft';
+  const S = live.report && live.phase !== 'play' ? live.report : matchStats(m);
+  const tabs = [['feed', 'Live'], ['plan', 'Scorecard'], ['moments', 'Replays'], ['touch', 'Touchline'], ['report', 'Stats']];
+  const minute = live.phase === 'ft' ? 'Full time' : live.phase === 'ht' ? 'Half-time' : matchMinute(m);
+  let body = '';
+  if (live.tab === 'feed') body = `${momentumHTML(m)}${feedHTML(m)}`;
+  else if (live.tab === 'plan') body = scorecardHTML(m);
+  else if (live.tab === 'moments') body = `${live.watching ? `<div class="card gold"><div class="row"><b class="grow">${esc(live.clip.min)} ${esc(live.clip.title)}</b><button class="btn small" id="clip-close">Back to the match</button></div>${momentsHTML()}<button class="btn small" data-train="${m.clips.indexOf(live.clip)}">Train this moment</button></div>` : ''}${clipsHTML(m)}`;
+  else if (live.tab === 'touch') body = touchlineHTML();
+  else body = `${statRowsHTML(S)}${momentumHTML(m)}`;
+  const avgSeg = live.phase === 'ht' || live.phase === 'ft' ? `<div class="avgview"><span class="small muted">On the pitch: average positions this half</span><span class="seg full"><button data-avg="ip" aria-pressed="${live.avgView === 'ip'}">With the ball</button><button data-avg="oop" aria-pressed="${live.avgView === 'oop'}">Without it</button></span></div>` : '';
+  const actions = live.phase === 'ht' ? `<div class="row"><button class="btn primary" id="match-second">Second half</button><button class="btn" data-mtab="touch">Make changes</button></div>`
+    : live.phase === 'ft' ? `<div class="row">${live.others ? `<p class="small muted">Playing the round’s other matches… ${live.others.done} of ${live.others.total}</p>` : `<button class="btn primary" id="match-again">${live.league || season.results.length ? 'Back to the league' : 'Done'}</button>`}<button class="btn" id="match-coach" ${lab.coachBusy ? 'disabled' : ''}>Ask the coach</button></div>${live.coachNote ? `<div class="callout">${live.coachNote.split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join('<br>')}</div>` : ''}` : '';
+  const verdict = live.phase === 'ft' || live.phase === 'ht' ? (() => { const rows = scorecard(m), ok = rows.filter((r) => r.ok).length; return `<p class="small">${live.phase === 'ft' ? 'Full time' : 'Half-time'}: the team did ${ok} of the ${rows.length} things you asked. ${m.score.home > m.score.away ? 'And you won.' : m.score.home < m.score.away ? 'The scorecard shows where it went wrong.' : ''}</p>`; })() : '';
   return `
-    <section><div class="scoreboard"><span class="tm">${esc(us.name)}</span><span class="sc">${match.score.home}–${match.score.away}</span><span class="tm r">${esc(them.name)}</span></div>
-      <p class="muted small">${ft ? 'Full time' : ht ? 'Half-time' : `${match.minute}’`}</p></section>
-    ${ht ? `<section><h2>Half-time report</h2>${matchStats('ht')}${matchReport(1)}<div class="row"><button class="btn" data-goto="tactics">Change tactics</button><button class="btn primary" id="match-second">Second half</button></div></section>` : ''}
-    ${ft ? `<section><h2>Full time</h2>${matchStats('ft')}${matchReport(2)}<button class="btn primary" id="match-again">${season.results.length && !match.league ? 'Back to the league' : 'Done'}</button></section>` : ''}
-    <section><h2>Moments</h2><div class="feed">${feed || '<p class="muted small">Kick-off…</p>'}</div></section>
-    ${replay.w ? `<section><h2>Key moments in this passage</h2>${momentsHTML()}</section>` : ''}`;
+    <section><div class="scoreboard"><span class="tm">${esc(m.w.T.home.name)}</span><span class="sc">${m.score.home}–${m.score.away}</span><span class="tm r">${esc(m.w.T.away.name)}</span></div>
+      <p class="muted small mstrip"><span>${esc(minute)}</span><span>xG ${S.home.xg.toFixed(2)} – ${S.away.xg.toFixed(2)}</span><span>Possession ${S.home.poss + S.away.poss > 0 ? `${Math.round(S.home.poss)}%` : '–'}</span></p>${verdict}${actions}${avgSeg}</section>
+    <section><div class="tabs inline">${tabs.map(([k, l]) => `<button data-mtab="${k}" aria-pressed="${live.tab === k}">${l}</button>`).join('')}</div>${body}</section>`;
+}
+function renderScorebug() {
+  const el = $('#scorebug'), m = live.m;
+  el.hidden = appMode !== 'match' || !m || live.phase === 'pre';
+  $('#stage').classList.toggle('in-match', !el.hidden);
+  if (el.hidden) return;
+  const min = live.phase === 'ft' ? 'FT' : live.phase === 'ht' ? 'HT' : matchMinute(m);
+  setHTML(el, `<span class="dot home"></span><span class="nm">${esc(m.w.T.home.name)}</span><span class="sc">${m.score.home}–${m.score.away}</span><span class="nm">${esc(m.w.T.away.name)}</span><span class="dot away"></span><span class="min">${esc(min)}</span>${live.paused ? '<span class="min">❚❚</span>' : ''}`);
+}
+// The coach's word after the game, written from the numbers (needs a model).
+async function askCoachMatch() {
+  const m = live.m;
+  if (!m || lab.coachBusy) return;
+  lab.coachBusy = true; live.coachNote = 'Reading the match…'; renderSide();
+  const S = matchStats(m), rows = scorecard(m), t = club.us.tactic;
+  const prompt = `You are an experienced football coach giving another coach a short debrief after a simulated match.
+${m.w.T.home.name} (the coach's side, ${styleLabel(t)}, ${t.formation}) ${m.score.home}–${m.score.away} ${m.w.T.away.name}.
+Stats (us v them): possession ${Math.round(S.home.poss)}% v ${Math.round(S.away.poss)}%, shots ${S.home.shots} v ${S.away.shots}, xG ${S.home.xg.toFixed(2)} v ${S.away.xg.toFixed(2)}, pass completion ${Math.round(S.home.passPct)}% v ${Math.round(S.away.passPct)}%, PPDA ${S.home.ppda.toFixed(1)} v ${S.away.ppda.toFixed(1)}, back line height ${Math.round(S.home.line)} m v ${Math.round(S.away.line)} m, won it back in their half ${S.home.highRegains} v ${S.away.highRegains}.
+What the coach asked for and whether it happened: ${rows.map((r) => `${r.asked}: ${r.value} (${r.ok ? 'done' : 'not done'})`).join('; ')}.
+How the goals came: ${m.feed.filter((f) => f.kind === 'goal').map((f) => `${f.min} ${f.text}`).join('; ') || 'no goals'}.
+In two short paragraphs of plain text (no markdown, no lists), say what decided the game and name one specific change to try next, using the instruction and role names above.`;
+  try {
+    const text = await askClaude(prompt, { maxTokens: 1200, onText: (_, all) => { live.coachNote = all; renderSide(); } });
+    live.coachNote = text.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/(\*\*|__|`)/g, '').trim();
+  } catch (err) {
+    live.coachNote = err.unavailable ? `The coach needs an AI connection. ${err.message}` : `Couldn’t get advice: ${err.message}`;
+  }
+  lab.coachBusy = false;
+  renderSide();
 }
 
 /* ================================================================
@@ -6101,10 +7045,16 @@ function syncBars() {
   $('#lab-space').setAttribute('aria-pressed', String(lab.showSpace));
   $('#lab-plan').setAttribute('aria-pressed', String(lab.showPlan));
   for (const b of document.querySelectorAll('[data-phase]')) b.setAttribute('aria-pressed', String(b.dataset.phase === tac.phase));
-  const go = $('#match-go'), skip = $('#match-skip');
-  go.textContent = { pre: seasonOver() ? 'Friendly' : 'Kick off', first: 'Playing…', ht: 'Second half', second: 'Playing…', ft: 'Done' }[match.phase];
-  go.disabled = match.phase === 'first' || match.phase === 'second';
-  skip.hidden = !(match.phase === 'first' || match.phase === 'second');
+  const go = $('#match-go'), on = liveOn() && live.phase !== 'pre', playing = on && live.phase === 'play';
+  go.textContent = !on ? (nextFixture() ? 'Kick off' : 'Friendly') : live.watching ? 'Back to the match' : playing ? (live.paused ? '▶ Play' : '❚❚ Pause')
+    : live.phase === 'ht' ? 'Second half' : live.others ? 'Other results…' : 'Done';
+  go.disabled = !!(on && live.phase === 'ft' && live.others);
+  $('#match-speed').hidden = !playing;
+  $('#match-speed').textContent = live.speed === 'hl' ? 'Highlights' : `${live.speed}×`;
+  $('#match-skip').hidden = !playing;
+  setHTML($('#match-skip'), `Skip<span class="bl"> to ${live.m?.half === 2 ? 'full time' : 'half-time'}</span>`);
+  $('#match-lines').hidden = !on;
+  $('#match-lines').setAttribute('aria-pressed', String(live.lines));
   renderScorebug();
 }
 
@@ -6140,14 +7090,20 @@ $('#side').addEventListener('click', (ev) => {
   else if (b.id === 'lesson-back') closeLesson();
   else if (b.id === 'lesson-hint') { lesson.hint++; renderSide(); }
   else if (d.unorder != null) { setOrder({ slot: +d.unorder }); if (lab.orderSel === +d.unorder) closeOrderMenu(); }
-  else if (b.id === 'guide-ok') { guideSeen = true; store.set(GUIDE_KEY, true); renderSide(); }
+  else if (d.guide) { guides[d.guide] = true; store.set(GUIDE_KEY, guides); renderSide(); }
   else if (b.id === 'match-kick') { kickOff(true); }
   else if (b.id === 'match-friendly') { kickOff(false); }
-  else if (b.id === 'season-new') { season = { ...freshSeason(), year: season.year + 1 }; saveSeason(); const nf = nextFixture(); club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); scout.key = null; renderSide(); }
-  else if (d.prepare != null) prepareFor(+d.prepare);
-  else if (b.id === 'match-second') { playHalf(2); }
-  else if (b.id === 'match-again') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); }
-  else if (d.watchItem != null) watchItem(+d.watchItem);
+  else if (b.id === 'season-new') { season = { ...freshSeason(), year: season.year + 1 }; saveSeason(); const nf = nextFixture(); club.oppId = nf.opp; club.them = opponentTeam(nf.opp); saveClub(); pruneOrders('away'); renderSide(); }
+  else if (d.prepare != null) prepareFor(+d.prepare, d.opp);
+  else if (b.id === 'match-second') secondHalf();
+  else if (b.id === 'match-again') matchDone();
+  else if (b.id === 'match-coach') askCoachMatch();
+  else if (b.id === 'clip-close') closeClip();
+  else if (d.clip != null) { live.tab = 'moments'; playClip(+d.clip); }
+  else if (d.train != null) { const c = live.m?.clips[+d.train]; if (c) trainMoment(c); }
+  else if (d.mtab) { live.tab = d.mtab; renderSide(); }
+  else if (d.avg) showAverage(d.avg);
+  else if (d.touch) touchline(d.touch.split('.')[1], d.v);
 });
 $('#side').addEventListener('change', (ev) => {
   const t = ev.target;
@@ -6187,9 +7143,17 @@ $('#lab-speed').addEventListener('click', () => { replay.speed = replay.speed ==
 for (const id of ['#lab-cam', '#match-cam']) $(id).addEventListener('click', () => { camPref.auto = !camPref.auto; store.set(CAM_KEY, camPref.auto); camDirty = true; syncBars(); requestRender(); });
 $('#lab-space').addEventListener('click', () => { lab.showSpace = !lab.showSpace; syncBars(); requestRender(); });
 $('#lab-plan').addEventListener('click', () => { lab.showPlan = !lab.showPlan; syncBars(); requestRender(); });
-for (const b of document.querySelectorAll('[data-phase]')) b.addEventListener('click', () => { tac.phase = b.dataset.phase; showShape(); renderSide(); syncBars(); });
-$('#match-go').addEventListener('click', () => { if (match.phase === 'pre') kickOff(!seasonOver()); else if (match.phase === 'ht') playHalf(2); else if (match.phase === 'ft') { match.phase = 'pre'; clearReplay(false); renderSide(); syncBars(); } });
-$('#match-skip').addEventListener('click', skipReveal);
+for (const b of document.querySelectorAll('[data-phase]')) b.addEventListener('click', () => { tac.phase = b.dataset.phase; store.set('tacticsLab.tacPhase', tac.phase); showShape(); renderSide(); syncBars(); });
+$('#match-go').addEventListener('click', () => {
+  if (live.watching) closeClip();
+  else if (!liveOn() || live.phase === 'pre') kickOff(!!nextFixture());
+  else if (live.phase === 'play') togglePause();
+  else if (live.phase === 'ht') secondHalf();
+  else if (!live.others) matchDone();
+});
+$('#match-speed').addEventListener('click', () => setSpeed(SPEEDS[(SPEEDS.indexOf(live.speed) + 1) % SPEEDS.length]));
+$('#match-skip').addEventListener('click', skipHalf);
+$('#match-lines').addEventListener('click', () => { live.lines = !live.lines; saveLive(); syncBars(); requestRender(); });
 
 /* ================================================================
    Drawing for the coaching modes
@@ -6197,19 +7161,13 @@ $('#match-skip').addEventListener('click', skipReveal);
 function drawCoaching() {
   usePitchSpace();
   const r = playerR();
-  if (appMode === 'tactics' && tac.ghost) {
-    // Where each player goes in the other phase: a faint ring and a thread.
-    const mine = state.players.filter((p) => p.team === tac.team);
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = lineWidthM(0.12);
-    ctx.setLineDash([0.6, 0.6]);
-    mine.forEach((p, i) => { const g = tac.ghost[i]; if (g) line(p.x, p.y, g[0], g[1]); });
-    ctx.setLineDash([]);
-    ctx.strokeStyle = colors[tac.team]; ctx.globalAlpha = 0.4;
-    mine.forEach((p, i) => { const g = tac.ghost[i]; if (g) circle(g[0], g[1], r * 0.7); });
-    ctx.globalAlpha = 1;
-    if (tac.phase === 'ip') drawRoleRuns(mine); else drawPressPlan(mine);
+  if (appMode === 'tactics') {
+    const mine = state.players.filter((p) => p.team === tac.team), P = TAC_PHASES[tac.phase];
+    drawTeamLines(tac.team, tac.tactic.instr, P.ours ? tac.team : oppOf(tac.team), null);
+    if (P.ours) drawRoleRuns(mine); else drawPressPlan(mine);
     return;
   }
+  if (liveBoard() && !replay.w) { if (live.lines) drawLiveLines(); return; }
   drawOrders();
   // Test marks: shots (ours blue, theirs red, goals filled) and where we won it back.
   if (!replay.w && lab.marks.length && lab.result && lab.result.sit === lab.sit && (appMode === 'lab' || (appMode === 'lessons' && lesson.id))) {
@@ -6296,13 +7254,12 @@ function drawPressPlan(mine) {
     ctx.save(); ctx.fillStyle = 'rgba(245,184,61,0.13)';
     for (let y = 0; y < PITCH.W; y += 1) if (inTrapZone(ins.pressTo, att, { y: y + 0.5 })) ctx.fillRect(Math.min(x0, x1), y, Math.abs(x1 - x0), 1);
     ctx.restore();
-    const ty = trapY(ins.pressTo, att, MID + 10), from = { x: xAtDepth(team, Math.min(zoneU, 95) - 6), y: MID };
-    arrow(from.x, from.y, from.x, ins.pressTo === 'middle' ? MID : ty + (ty < MID ? 6 : -6), colors.select, 0.6, { label: 'show them here', alpha: 0.8 });
+    // From the ball (or the edge of the press, if the ball is beyond it) towards the side you show them onto.
+    const bu = depthOf(team, state.ball.x), ax = bu <= zoneU ? state.ball.x : x1, ay = state.ball.y;
+    const ty = ins.pressTo === 'middle' ? MID : trapY(ins.pressTo, att, ay);
+    if (Math.abs(ty - ay) > 4) arrow(ax, ay, ax, ty + (ty < ay ? 3 : -3), colors.select, 0.6, { label: 'show them here', alpha: 0.85 });
+    else pitchLabel(ax, ay - 4, 'show them here', colors.select);
   }
-  // The press zone's edge.
-  ctx.save(); ctx.strokeStyle = colors.select; ctx.globalAlpha = 0.6; ctx.lineWidth = lineWidthM(0.2); ctx.setLineDash([1, 0.8]);
-  if (zoneU < PITCH.L) line(x1, 0, x1, PITCH.W);
-  ctx.restore();
   // Hunters and eager pressers: an arrow to the man they go for. Men told to stay: a ring.
   const opp = (tac.opp || []).map(([x, y]) => ({ x, y }));
   mine.forEach((p, i) => {
@@ -6572,7 +7529,7 @@ let boardSnap = null, labSitSaved = null;
 function setMode(mode, init = false) {
   if (anim || !MODES.includes(mode)) return;
   const prev = init ? null : appMode;
-  if (prev === 'match' && (match.phase === 'first' || match.phase === 'second')) skipReveal();
+  if (prev === 'match') leaveMatch();
   if (prev === 'board') { boardSnap = snapshot(); store.set(BOARD_KEY, boardSnap); }
   closeOrderMenu();
   clearReplay(false);
@@ -6598,11 +7555,7 @@ function setMode(mode, init = false) {
     else loadSituation(lab.sit, true);
   }
   else if (mode === 'lessons') { if (lesson.id) loadSituation(lab.sit, true); else showLessonPreview(); }
-  else if (mode === 'match') {
-    const it = match.items[match.current];
-    if (it) placeSetup(it.teams, it.setup);
-    else { const teams = teamsOf(club), sit = SITUATIONS.find((s) => s.id === 'midfield'); placeSetup(teams, engSetup(teams, sit)); }
-  }
+  else if (mode === 'match') enterMatch();
   syncPanel();
   renderSide();
   syncBars();
